@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generator Iklan &amp; Affiliate</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>🎬 Generator Iklan &amp; Affiliate</h1>
+  <span id="authBadge" class="badge hidden">🔒</span>
+</header>
+
+<main class="container">
+
+  <!-- ============ TAHAP 1: FORM ============ -->
+  <section id="view-form" class="view">
+    <div class="card">
+      <h2>1. Form Input <small>Isi data produk dan aset visual</small></h2>
+      <div class="mode-row">
+        <button type="button" id="modeIklan" class="mode-btn">📣 Bikin Iklan</button>
+        <button type="button" id="modeAffiliate" class="mode-btn active">🛍️ Bikin Affiliate</button>
+      </div>
+
+      <label>Link Produk Utama <span class="req">*</span></label>
+      <input type="url" id="productUrl" placeholder="https://shopee.co.id/product/123456...">
+
+      <label>Link Produk Penunjang <span class="opt">(opsional)</span></label>
+      <input type="url" class="supUrl" placeholder="Link produk penunjang 1">
+      <input type="url" class="supUrl" placeholder="Link produk penunjang 2">
+      <input type="url" class="supUrl" placeholder="Link produk penunjang 3">
+
+      <div class="two-col">
+        <div>
+          <label>Foto Karakter</label>
+          <div class="char-row">
+            <select id="characterSelect"><option value="">— Tanpa karakter —</option></select>
+            <button type="button" id="charAddBtn" class="btn small">＋ Tambah</button>
+          </div>
+          <div id="charList" class="char-list"></div>
+          <div id="charForm" class="hidden inline-form">
+            <input type="text" id="charName" placeholder="Nama karakter">
+            <input type="text" id="charDesc" placeholder="Deskripsi singkat (opsional)">
+            <input type="file" id="charPhoto" accept="image/*">
+            <button type="button" id="charSaveBtn" class="btn small primary">Simpan</button>
+          </div>
+        </div>
+        <div>
+          <label>Foto Tempat <span class="opt">(opsional)</span></label>
+          <div class="upload-box" id="placeBox">
+            <input type="file" id="placePhoto" accept="image/*" hidden>
+            <div class="upload-hint">📷 Pilih foto tempat</div>
+            <img id="placePreview" class="hidden" alt="pratinjau tempat">
+            <div id="placeName" class="file-name"></div>
+            <button type="button" id="placeRemove" class="btn small hidden">✕ Hapus</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" id="resetBtn" class="btn">Reset Form</button>
+        <button type="button" id="nextBtn" class="btn primary">Lanjutkan →</button>
+      </div>
+      <div id="formError" class="error hidden"></div>
+    </div>
+  </section>
+
+  <!-- ============ TAHAP 2: PREVIEW ============ -->
+  <section id="view-preview" class="view hidden">
+    <div class="card">
+      <h2>2. Preview Produk <small>Verifikasi produk sebelum diproses</small></h2>
+      <div id="previewLoading" class="loading">Mengambil info produk…</div>
+      <div id="previewContent" class="hidden">
+        <div id="mainProductCard" class="product-card"></div>
+        <div id="supProducts" class="sup-grid"></div>
+        <div class="form-actions">
+          <button type="button" id="backBtn" class="btn">← Kembali</button>
+          <button type="button" id="processBtn" class="btn primary">Proses →</button>
+        </div>
+      </div>
+      <div id="previewError" class="error hidden"></div>
+    </div>
+  </section>
+
+  <!-- ============ TAHAP 3: PROSES ============ -->
+  <section id="view-process" class="view hidden">
+    <div class="card">
+      <div class="process-head">
+        <div class="gear">⚙️</div>
+        <h2 id="processTitle">Memproses Konten Anda</h2>
+        <p id="processSub">Mohon tunggu, sistem sedang bekerja…</p>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-bar"><div id="progressFill"></div></div>
+        <span id="progressPct">0%</span>
+      </div>
+      <ul id="checklist" class="checklist"></ul>
+      <h3>Log Proses</h3>
+      <div id="logPanel" class="log-panel"></div>
+      <div class="form-actions">
+        <button type="button" id="retryBtn" class="btn hidden">🔄 Coba Lagi</button>
+        <button type="button" id="newJobBtn" class="btn hidden">＋ Buat Baru</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TAHAP 4: HASIL ============ -->
+  <section id="view-result" class="view hidden">
+    <div class="card">
+      <div class="success-banner">✅ <b>Proses selesai!</b><br><small>Storyboard dan prompt video berhasil dibuat.</small></div>
+      <h2>Storyboard <button type="button" id="dlStoryboardBtn" class="btn small primary">⬇ Unduh Storyboard</button></h2>
+      <div id="storyboards" class="storyboards"></div>
+      <h2>Prompt Video (Lengkap) <button type="button" id="copyPromptBtn" class="btn small">📋 Salin Prompt</button></h2>
+      <pre id="promptText" class="prompt-box"></pre>
+      <div class="form-actions">
+        <button type="button" id="resultNewBtn" class="btn primary">＋ Buat Baru</button>
+      </div>
+    </div>
+  </section>
+
+</main>
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

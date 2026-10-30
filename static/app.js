@@ -15,6 +15,167 @@ function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.rem
 function show(view) { document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden")); $(view).classList.remove("hidden"); window.scrollTo(0, 0); }
 function errBox(id, msg) { const e = $(id); if (!msg) { e.classList.add("hidden"); return; } e.textContent = msg; e.classList.remove("hidden"); }
 
+/* ========== Shopee QR Login ========== */
+let qrPollTimer = null;
+let qrCountdownTimer = null;
+let currentQrId = null;
+
+async function checkShopeeStatus() {
+  try {
+    const j = await api("/api/shopee/status");
+    updateShopeeUI(j.logged_in);
+  } catch (e) { /* ignore */ }
+}
+
+function updateShopeeUI(loggedIn) {
+  if (loggedIn) {
+    $("shopeeLoginBtn").classList.add("hidden");
+    $("shopeeStatus").classList.remove("hidden");
+    $("shopeeLogoutBtn").classList.remove("hidden");
+  } else {
+    $("shopeeLoginBtn").classList.remove("hidden");
+    $("shopeeStatus").classList.add("hidden");
+    $("shopeeLogoutBtn").classList.add("hidden");
+  }
+}
+
+$("shopeeLoginBtn").onclick = async () => {
+  $("qrModal").classList.remove("hidden");
+  await loadQR();
+};
+
+$("qrCloseBtn").onclick = () => closeQRModal();
+$("qrModal").onclick = (e) => { if (e.target === $("qrModal")) closeQRModal(); };
+
+function closeQRModal() {
+  $("qrModal").classList.add("hidden");
+  if (qrPollTimer) { clearInterval(qrPollTimer); qrPollTimer = null; }
+  if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
+  if (currentQrId) {
+    api("/api/shopee/qr/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ qrcode_id: currentQrId }),
+    }).catch(() => {});
+    currentQrId = null;
+  }
+}
+
+$("qrRefreshBtn").onclick = async () => {
+  if (qrPollTimer) { clearInterval(qrPollTimer); qrPollTimer = null; }
+  if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
+  await loadQR();
+};
+
+async function loadQR() {
+  $("qrLoading").classList.remove("hidden");
+  $("qrLoading").textContent = "Memuat QR Code...";
+  $("qrImageWrap").classList.add("hidden");
+  $("qrTimer").classList.add("hidden");
+  $("qrInstruction").classList.add("hidden");
+  $("qrRefreshBtn").classList.add("hidden");
+  $("qrStatusMsg").textContent = "";
+  $("qrStatusMsg").className = "qr-status-msg";
+
+  if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
+
+  try {
+    const j = await api("/api/shopee/qr", { method: "POST" });
+    if (!j.ok) throw new Error(j.error || "Gagal generate QR");
+
+    currentQrId = j.qrcode_id;
+    $("qrImage").src = "data:image/png;base64," + j.qrcode_base64;
+    $("qrLoading").classList.add("hidden");
+    $("qrImageWrap").classList.remove("hidden");
+    $("qrTimer").classList.remove("hidden");
+    $("qrInstruction").classList.remove("hidden");
+
+    // Countdown 60 detik
+    let timeLeft = 60;
+    $("qrTimerCount").textContent = timeLeft;
+    qrCountdownTimer = setInterval(() => {
+      timeLeft--;
+      if (timeLeft <= 0) {
+        clearInterval(qrCountdownTimer);
+        qrCountdownTimer = null;
+        $("qrTimer").classList.add("hidden");
+        $("qrStatusMsg").textContent = "⏰ QR Code kedaluwarsa. Silakan buat QR baru.";
+        $("qrStatusMsg").className = "qr-status-msg expired";
+        $("qrRefreshBtn").classList.remove("hidden");
+      } else {
+        $("qrTimerCount").textContent = timeLeft;
+      }
+    }, 1000);
+
+    // Start polling status
+    startQRPolling(j.qrcode_id);
+  } catch (e) {
+    $("qrLoading").textContent = "Gagal memuat QR: " + e.message;
+    $("qrRefreshBtn").classList.remove("hidden");
+  }
+}
+
+function startQRPolling(qrId) {
+  if (qrPollTimer) clearInterval(qrPollTimer);
+  let attempts = 0;
+  const maxAttempts = 60; // polling tiap 2 dtk
+
+  const tick = async () => {
+    attempts++;
+    if (attempts > maxAttempts) {
+      clearInterval(qrPollTimer);
+      qrPollTimer = null;
+      if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
+      $("qrStatusMsg").textContent = "⏰ QR Code kedaluwarsa";
+      $("qrStatusMsg").className = "qr-status-msg expired";
+      $("qrRefreshBtn").classList.remove("hidden");
+      return;
+    }
+    try {
+      const j = await api("/api/shopee/qr/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ qrcode_id: qrId }),
+      });
+
+      if (j.status === "SCANNED") {
+        $("qrStatusMsg").textContent = "📱 QR di-scan! Konfirmasi di HP Anda...";
+        $("qrStatusMsg").className = "qr-status-msg scanning";
+      } else if (j.status === "CONFIRMED") {
+        clearInterval(qrPollTimer);
+        qrPollTimer = null;
+        if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
+        $("qrTimer").classList.add("hidden");
+        $("qrStatusMsg").textContent = "✅ Login berhasil!";
+        $("qrStatusMsg").className = "qr-status-msg success";
+        updateShopeeUI(true);
+        setTimeout(() => closeQRModal(), 1500);
+        toast("Login Shopee berhasil!");
+      } else if (j.status === "EXPIRED" || j.status === "ERROR") {
+        clearInterval(qrPollTimer);
+        qrPollTimer = null;
+        if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
+        $("qrTimer").classList.add("hidden");
+        $("qrStatusMsg").textContent = "⏰ " + (j.error || "QR Code kedaluwarsa");
+        $("qrStatusMsg").className = "qr-status-msg expired";
+        $("qrRefreshBtn").classList.remove("hidden");
+      }
+    } catch (e) { /* tunggu tick berikutnya */ }
+  };
+
+  tick();
+  qrPollTimer = setInterval(tick, 2000);
+}
+
+$("shopeeLogoutBtn").onclick = async () => {
+  if (!confirm("Logout dari Shopee?")) return;
+  try {
+    await api("/api/shopee/logout", { method: "POST" });
+    updateShopeeUI(false);
+    toast("Berhasil logout Shopee");
+  } catch (e) { toast("Gagal logout: " + e.message); }
+};
+
 /* ---------- mode ---------- */
 $("modeIklan").onclick = () => setMode("iklan");
 $("modeAffiliate").onclick = () => setMode("affiliate");
@@ -64,40 +225,120 @@ $("placeRemove").onclick = (e) => { e.stopPropagation(); $("placePhoto").value =
 $("resetBtn").onclick = () => { document.querySelectorAll("#view-form input[type=url], #view-form input[type=text]").forEach((i) => (i.value = "")); $("placeRemove").onclick({ stopPropagation() {} }); setMode("affiliate"); errBox("formError", ""); };
 $("nextBtn").onclick = async () => {
   errBox("formError", "");
-  const url = $("productUrl").value.trim();
-  if (!url) { errBox("formError", "Link Produk Utama wajib diisi."); return; }
-  show("view-preview"); $("previewLoading").classList.remove("hidden"); $("previewContent").classList.add("hidden"); errBox("previewError", "");
+  const rawInput = $("productUrl").value.trim();
+  if (!rawInput) { errBox("formError", "Link atau teks share produk wajib diisi."); return; }
+  
+  show("view-preview");
+  $("previewLoading").classList.remove("hidden");
+  $("previewContent").classList.add("hidden");
+  errBox("previewError", "");
+
   try {
-    const j = await api("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+    const j = await api("/api/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: rawInput }),
+    });
     state.preview = j.product;
     renderPreview(j.product);
-    $("previewLoading").classList.add("hidden"); $("previewContent").classList.remove("hidden");
-  } catch (e) { $("previewLoading").classList.add("hidden"); errBox("previewError", e.message + " — periksa link lalu coba lagi, atau lanjutkan dan isi manual di tahap berikut."); $("previewContent").classList.remove("hidden"); renderPreview(null); }
+    $("previewLoading").classList.add("hidden");
+    $("previewContent").classList.remove("hidden");
+    if (j.product && j.product.needs_manual_input) {
+      errBox("previewError", "Shopee membatasi akses otomatis. Silakan cek & lengkapi data nama produk di bawah sebelum melanjutkan.");
+    }
+  } catch (e) {
+    $("previewLoading").classList.add("hidden");
+    errBox("previewError", e.message + " — Silakan isi data nama produk secara manual di bawah.");
+    $("previewContent").classList.remove("hidden");
+    renderPreview(null);
+  }
 };
-function pCard(p, main) {
-  if (!p) return `<div class="product-card"><div><b>Data produk tidak terbaca.</b><br><small>Lanjutkan untuk isi manual, atau kembali dan perbaiki link.</small></div></div>`;
-  return `<div class="product-card">${p.image ? `<img src="${p.image}" alt="">` : ""}<div><b>${p.title || "-"}</b><br><span class="price">${p.price || ""}</span><br><small>${p.rating || ""} ${p.description ? "· " + p.description.slice(0, 120) : ""}</small></div></div>`;
-}
-async function renderPreview(main) {
-  $("mainProductCard").innerHTML = pCard(main, true);
-  const supGrid = $("supProducts"); supGrid.innerHTML = "";
+
+function renderPreview(main) {
+  const p = main || {};
+  state.productPhotoFile = null;
+  const initialImg = p.image || "";
+
+  $("mainProductCard").innerHTML = `
+    <div style="width: 100%; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;">
+        <div id="previewImgBox" style="width: 130px; height: 130px; border-radius: 10px; border: 2px dashed var(--border); display: flex; align-items: center; justify-content: center; overflow: hidden; background: #fafafa; flex-shrink: 0; cursor: pointer; position: relative;" title="Klik untuk upload foto produk">
+          ${initialImg ? `<img id="previewImgEl" src="${initialImg}" style="width: 100%; height: 100%; object-fit: cover;">` : `<div style="font-size: 0.78rem; color: var(--muted); text-align: center; padding: 6px;">📷 Upload Foto Produk</div>`}
+        </div>
+        <div style="flex: 1; min-width: 240px;">
+          <label style="margin: 0 0 4px 0; font-size: 0.88rem;">Nama / Judul Produk <span class="req">*</span></label>
+          <input type="text" id="editProductTitle" value="${(p.title || '').replace(/"/g, '&quot;')}" placeholder="Contoh: Xavire Dress Party Dress..." style="margin-bottom: 8px; font-weight: 600;">
+          
+          <label style="margin: 0 0 4px 0; font-size: 0.88rem;">Harga Produk</label>
+          <input type="text" id="editProductPrice" value="${(p.price || '').replace(/"/g, '&quot;')}" placeholder="Contoh: Rp176.500" style="margin-bottom: 0;">
+        </div>
+      </div>
+      <input type="file" id="editProductPhotoFile" accept="image/*" style="display: none;">
+      <small style="color: var(--muted);">💡 Anda dapat mengoreksi nama, harga, atau mengupload foto produk langsung sebelum menekan tombol Proses.</small>
+    </div>
+  `;
+
+  $("previewImgBox").onclick = () => $("editProductPhotoFile").click();
+  $("editProductPhotoFile").onchange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      state.productPhotoFile = file;
+      const url = URL.createObjectURL(file);
+      $("previewImgBox").innerHTML = `<img src="${url}" style="width: 100%; height: 100%; object-fit: cover;">`;
+    }
+  };
+
+  const supGrid = $("supProducts");
+  supGrid.innerHTML = "";
   for (const inp of document.querySelectorAll(".supUrl")) {
-    const u = inp.value.trim(); if (!u) continue;
-    try { const j = await api("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u }) }); supGrid.innerHTML += pCard(j.product); }
-    catch (e) { supGrid.innerHTML += `<div class="product-card"><div><b>Gagal membaca:</b><br><small>${u}</small></div></div>`; }
+    const u = inp.value.trim();
+    if (!u) continue;
+    try {
+      api("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u }) })
+        .then((j) => {
+          const sp = j.product || {};
+          supGrid.innerHTML += `<div class="product-card"><div><b>${sp.title || u}</b><br><span class="price">${sp.price || ""}</span></div></div>`;
+        })
+        .catch(() => {
+          supGrid.innerHTML += `<div class="product-card"><div><b>Produk Penunjang:</b><br><small>${u}</small></div></div>`;
+        });
+    } catch (e) { /* ignore */ }
   }
 }
+
 $("backBtn").onclick = () => show("view-form");
 
 /* ---------- buat job & proses ---------- */
 $("processBtn").onclick = async () => {
+  const title = $("editProductTitle") ? $("editProductTitle").value.trim() : "";
+  if (!title) {
+    errBox("previewError", "Nama produk wajib diisi sebelum melanjutkan.");
+    return;
+  }
+  const price = $("editProductPrice") ? $("editProductPrice").value.trim() : "";
+
   const fd = new FormData();
   fd.append("mode", state.mode);
-  fd.append("product_url", $("productUrl").value.trim());
+
+  // Ambil URL produk yang valid
+  let rawUrl = $("productUrl").value.trim();
+  let m = rawUrl.match(/(https?:\/\/(?:s\.shopee\.co\.id|shope\.ee|shopee\.co\.id)\/\S+)/);
+  let finalUrl = m ? m[1] : (state.preview && state.preview.url ? state.preview.url : rawUrl);
+  fd.append("product_url", finalUrl);
+
   document.querySelectorAll(".supUrl").forEach((i) => { if (i.value.trim()) fd.append("supporting_urls", i.value.trim()); });
   fd.append("character_id", $("characterSelect").value);
   if ($("placePhoto").files[0]) fd.append("place_photo", $("placePhoto").files[0]);
-  if (state.preview) { fd.append("product_title", state.preview.title || ""); fd.append("product_price", state.preview.price || ""); fd.append("product_image", state.preview.image || ""); }
+
+  fd.append("product_title", title);
+  fd.append("product_price", price);
+
+  if (state.productPhotoFile) {
+    fd.append("product_photo", state.productPhotoFile);
+  } else if (state.preview && state.preview.image) {
+    fd.append("product_image", state.preview.image);
+  }
+
   try {
     const j = await api("/api/jobs", { method: "POST", body: fd });
     startPolling(j.job_id);
@@ -176,3 +417,4 @@ $("dlStoryboardBtn").onclick = () => {
 };
 
 loadCharacters();
+checkShopeeStatus();

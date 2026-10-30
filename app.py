@@ -13,6 +13,7 @@ from flask import Flask, jsonify, render_template, request, send_from_directory
 import db
 from config import C
 from services import shopee
+from services import shopee_auth
 from worker import start_worker
 
 app = Flask(__name__)
@@ -87,11 +88,12 @@ def api_create_job():
     ]
     character_id = request.form.get("character_id") or None
     place_photo = _save_upload(request.files.get("place_photo"), "places")
+    product_photo = _save_upload(request.files.get("product_photo"), "products")
 
     # data preview yang sudah dikonfirmasi user (opsional, dari tahap preview)
     title = request.form.get("product_title") or product_url
     price = request.form.get("product_price") or ""
-    image = request.form.get("product_image") or ""
+    image = f"/uploads/products/{os.path.basename(product_photo)}" if product_photo else (request.form.get("product_image") or "")
 
     job_id = uuid.uuid4().hex[:12]
     conn = db.get_conn()
@@ -245,10 +247,60 @@ def serve_char_photo(fname):
     return send_from_directory(os.path.join(C.UPLOAD_DIR, "characters"), fname)
 
 
+@app.route("/uploads/products/<path:fname>")
+@require_token
+def serve_product_photo(fname):
+    return send_from_directory(os.path.join(C.UPLOAD_DIR, "products"), fname)
+
+
 @app.route("/outputs/<path:fname>")
 @require_token
 def serve_output(fname):
     return send_from_directory(C.OUTPUT_DIR, fname)
+
+
+# ---------- Shopee QR Login ----------
+@app.route("/api/shopee/status")
+@require_token
+def api_shopee_status():
+    return jsonify({"ok": True, "logged_in": shopee_auth.is_logged_in()})
+
+
+@app.route("/api/shopee/qr", methods=["POST"])
+@require_token
+def api_shopee_qr():
+    try:
+        data = shopee_auth.generate_qr()
+        return jsonify({"ok": True, **data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/shopee/qr/check", methods=["POST"])
+@require_token
+def api_shopee_qr_check():
+    body = request.get_json(force=True, silent=True) or {}
+    qr_id = body.get("qrcode_id", "")
+    if not qr_id:
+        return jsonify({"error": "qrcode_id wajib"}), 400
+    result = shopee_auth.check_status(qr_id)
+    return jsonify({"ok": True, **result})
+
+
+@app.route("/api/shopee/qr/cancel", methods=["POST"])
+@require_token
+def api_shopee_qr_cancel():
+    body = request.get_json(force=True, silent=True) or {}
+    qr_id = body.get("qrcode_id")
+    shopee_auth.cancel_qr(qr_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/shopee/logout", methods=["POST"])
+@require_token
+def api_shopee_logout():
+    shopee_auth.clear_cookies()
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":

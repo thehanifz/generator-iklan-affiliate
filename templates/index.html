@@ -9,8 +9,46 @@
 <body>
 <header class="topbar">
   <h1>🎬 Generator Iklan &amp; Affiliate</h1>
-  <span id="authBadge" class="badge hidden">🔒</span>
+  <div class="topbar-right">
+    <button type="button" id="shopeeLoginBtn" class="btn small shopee-btn" title="Login Shopee">🛒 Login Shopee</button>
+    <span id="shopeeStatus" class="shopee-status hidden">✅ Terhubung</span>
+    <button type="button" id="shopeeLogoutBtn" class="btn small hidden" title="Logout Shopee">Logout</button>
+    <span id="authBadge" class="badge hidden">🔒</span>
+  </div>
 </header>
+
+<!-- Modal QR Shopee -->
+<div id="qrModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>🛒 Login Shopee via QR Code</h3>
+      <button type="button" id="qrCloseBtn" class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="qrLoading" class="qr-loading">Memuat QR Code...</div>
+      <div id="qrImageWrap" class="qr-image-wrap hidden">
+        <img id="qrImage" alt="QR Code Shopee" />
+      </div>
+      <div id="qrTimer" class="qr-timer hidden" style="font-size: 0.85rem; color: #e67e22; font-weight: 600; margin-top: 6px;">
+        ⏳ Masa berlaku: <span id="qrTimerCount">60</span> detik
+      </div>
+      <div id="qrInstruction" class="qr-instruction hidden" style="text-align: left; font-size: 0.82rem; margin-top: 10px; background: #fff8f5; border: 1px solid #ffd8cc; padding: 10px; border-radius: 6px;">
+        <p style="font-weight: bold; margin: 0 0 6px 0; color: #d35400;">⚠️ Panduan Scan di HP:</p>
+        <ol style="margin: 0; padding-left: 18px; line-height: 1.45;">
+          <li>Buka <b>Aplikasi Shopee</b> di HP Anda.</li>
+          <li>Di halaman <b>Beranda</b>, ketuk ikon <b>[ - ] Scan</b> (di samping kolom pencarian).</li>
+          <li>Pastikan memilih mode <b>QR / Barcode</b> (<b>JANGAN</b> scan lewat menu ShopeePay / QRIS).</li>
+          <li>Arahkan kamera ke QR di atas, lalu ketuk <b>Konfirmasi Login</b>.</li>
+        </ol>
+        <div style="margin-top: 6px; font-size: 0.78rem; color: #7f8c8d;">
+          *Jika muncul <i>"Kode QR salah"</i>, kode QR sudah kedaluwarsa atau salah menu scanner. Klik tombol <b>🔄 Buat QR Baru</b> di bawah lalu segera scan.
+        </div>
+      </div>
+      <div id="qrStatusMsg" class="qr-status-msg"></div>
+      <button type="button" id="qrRefreshBtn" class="btn small hidden">🔄 Buat QR Baru</button>
+    </div>
+  </div>
+</div>
 
 <main class="container">
 
@@ -23,8 +61,8 @@
         <button type="button" id="modeAffiliate" class="mode-btn active">🛍️ Bikin Affiliate</button>
       </div>
 
-      <label>Link Produk Utama <span class="req">*</span></label>
-      <input type="url" id="productUrl" placeholder="https://shopee.co.id/product/123456...">
+      <label>Link atau Teks Share Produk Utama <span class="req">*</span></label>
+      <input type="text" id="productUrl" placeholder="Tempel link atau teks share Shopee (misal: Cek Dress... https://s.shopee.co.id/...)">
 
       <label>Link Produk Penunjang <span class="opt">(opsional)</span></label>
       <input type="url" class="supUrl" placeholder="Link produk penunjang 1">

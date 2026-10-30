@@ -9,10 +9,13 @@ Mendukung:
    sehingga pengguna dapat melengkapi atau mengeditnya di UI.
 """
 import html
+import logging
 import re
 import requests
 
 from config import C
+
+logger = logging.getLogger("shopee")
 
 HEADERS = {
     "User-Agent": (
@@ -92,7 +95,10 @@ def resolve_url(url, timeout=15):
         s = _get_session()
         # Gunakan GET dengan stream=True agar ringan tapi mengikuti redirect secara akurat
         r = s.get(url, allow_redirects=True, timeout=timeout, stream=True)
-        return r.url
+        try:
+            return r.url
+        finally:
+            r.close()
     except Exception:
         return url
 
@@ -111,6 +117,81 @@ def _meta(page, prop):
         re.IGNORECASE,
     )
     return html.unescape(m.group(1).strip()) if m else ""
+
+
+def _looks_like_challenge(page_html):
+    """Deteksi halaman captcha-shell WAF Shopee.
+
+    Shopee mengembalikan HTTP 200 berisi halaman anti-bot (tanpa og: meta tags)
+    untuk HTTP client non-browser — harus dibedakan dari halaman produk asli.
+    """
+    if re.search(r'<meta[^>]+property=["\']og:title["\']', page_html, re.IGNORECASE):
+        return False
+    return bool(re.search(r'pcmall-captcha|stm-sg-live|__captcha|robot-check', page_html, re.IGNORECASE))
+
+
+def fetch_meta_via_browser(url, timeout=30):
+    """Ambil og: meta tags produk via headless Chromium (Playwright).
+
+    Fallback ketika `requests` diblokir WAF Shopee. Memakai fingerprint stealth
+    yang sama dengan alur QR login (services.shopee_auth) + cookies login yang
+    tersimpan di data/shopee_cookies.json, sehingga Shopee menyajikan halaman
+    produk asli — bukan captcha-shell.
+
+    Hanya dipanggil bila jalur cepat gagal total (judul masih kosong), jadi
+    link yang datanya sudah lengkap dari teks share tidak ikut melambat.
+
+    Kembalikan dict {title, price, image, description}; kosong bila gagal.
+    """
+    out = {"title": "", "price": "", "image": "", "description": ""}
+    try:
+        from playwright.sync_api import sync_playwright
+        from services import shopee_auth
+    except ImportError:
+        logger.warning("playwright tidak terinstal, fallback browser dilewati")
+        return out
+
+    playwright = None
+    browser = None
+    context = None
+    try:
+        playwright = sync_playwright().start()
+        browser = shopee_auth.launch_stealth_browser(playwright)
+        context, page = shopee_auth.new_stealth_context(browser)
+        page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+        # og:title hanya ada di halaman produk asli, bukan captcha-shell
+        try:
+            page.wait_for_selector('meta[property="og:title"]', timeout=12000)
+        except Exception:
+            pass
+        data = page.evaluate(
+            """() => {
+                const get = (p) => {
+                    const el = document.querySelector('meta[property="' + p + '"]');
+                    return el ? (el.getAttribute('content') || '').trim() : '';
+                };
+                return {
+                    title: get('og:title'),
+                    price: get('product:price:amount') || get('og:price:amount'),
+                    image: get('og:image'),
+                    description: get('og:description'),
+                };
+            }"""
+        )
+        if isinstance(data, dict):
+            for k in out:
+                if data.get(k):
+                    out[k] = data[k]
+    except Exception as e:
+        logger.warning("fetch_meta_via_browser gagal: %s", e)
+    finally:
+        for obj, meth in ((context, "close"), (browser, "close"), (playwright, "stop")):
+            try:
+                if obj:
+                    getattr(obj, meth)()
+            except Exception:
+                pass
+    return out
 
 
 def fetch_product(url_or_text, timeout=20):
@@ -147,24 +228,46 @@ def fetch_product(url_or_text, timeout=20):
     try:
         s = _get_session()
         r = s.get(final_url, timeout=timeout)
-        if r.status_code == 200:
-            page = r.text
-            meta_title = _meta(page, "og:title")
-            meta_image = _meta(page, "og:image")
-            meta_desc = _meta(page, "og:description")
-            meta_price = _meta(page, "product:price:amount") or _meta(page, "og:price:amount")
+        try:
+            if r.status_code == 200:
+                page = r.text
+                # WAF Shopee memberi HTTP 200 berisi captcha-shell untuk client
+                # non-browser — jangan perlakukan sebagai halaman produk.
+                if _looks_like_challenge(page):
+                    logger.info("WAF Shopee memblokir requests; coba fallback browser")
+                else:
+                    meta_title = _meta(page, "og:title")
+                    meta_image = _meta(page, "og:image")
+                    meta_desc = _meta(page, "og:description")
+                    meta_price = _meta(page, "product:price:amount") or _meta(page, "og:price:amount")
 
-            # Jangan pakai generic Shopee title
-            if meta_title and "Shopee" not in meta_title:
-                title = title or meta_title
-            if meta_image:
-                image = meta_image
-            if meta_desc:
-                desc = meta_desc[:500]
-            if meta_price:
-                price = price or meta_price
+                    # Jangan pakai generic Shopee title
+                    if meta_title and "Shopee" not in meta_title:
+                        title = title or meta_title
+                    if meta_image:
+                        image = meta_image
+                    if meta_desc:
+                        desc = meta_desc[:500]
+                    if meta_price:
+                        price = price or meta_price
+        finally:
+            r.close()
     except Exception:
         pass
+
+    # Fallback browser: HANYA bila judul masih kosong (preview akan gagal).
+    # Headless Chromium lolos WAF Shopee (fingerprint browser asli + cookies
+    # login), jadi link telanjang tetap bisa diproses — dengan tambahan waktu.
+    if not title:
+        bmeta = fetch_meta_via_browser(final_url)
+        if bmeta["title"] and "Shopee" not in bmeta["title"]:
+            title = bmeta["title"]
+        if bmeta["image"]:
+            image = bmeta["image"]
+        if bmeta["description"]:
+            desc = bmeta["description"][:500]
+        if bmeta["price"]:
+            price = price or bmeta["price"]
 
     # Jika judul masih kosong (misal user hanya memasukkan link pendek tanpa teks share dan scraping diblokir)
     if not title:

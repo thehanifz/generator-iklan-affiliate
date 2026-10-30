@@ -39,6 +39,53 @@ DESKTOP_UA = (
     "Chrome/130.0.0.0 Safari/537.36"
 )
 
+# Argumen Chromium anti-deteksi yang terbukti lolos WAF Shopee (dipakai QR login)
+STEALTH_ARGS = [
+    "--disable-blink-features=AutomationControlled",
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-infobars",
+    "--window-size=1280,800",
+]
+
+
+def launch_stealth_browser(playwright):
+    """Luncurkan Chromium headless dengan fingerprint anti-deteksi bot.
+
+    Dipakai bersama oleh alur QR login dan fetch produk — satu fingerprint
+    yang sudah terbukti lolos WAF Shopee.
+    """
+    browser = playwright.chromium.launch(
+        channel="chrome",
+        headless=True,
+        args=STEALTH_ARGS,
+    )
+    return browser
+
+
+def new_stealth_context(browser):
+    """Buat browser context + inject cookies login Shopee yang tersimpan.
+
+    Mengembalikan (context, page) yang siap dipakai. Jika tidak ada cookies
+    tersimpan, context tetap dibuat tanpa cookies (tetap fingerprint asli).
+    """
+    context = browser.new_context(
+        user_agent=DESKTOP_UA,
+        viewport={"width": 1280, "height": 800},
+        locale="id-ID",
+    )
+    cookies = load_cookies()
+    if cookies:
+        context.add_cookies([
+            {"name": k, "value": v, "domain": ".shopee.co.id", "path": "/"}
+            for k, v in cookies.items()
+            if isinstance(v, str) and v
+        ])
+    page = context.new_page()
+    # Hapus flag webdriver agar tidak terdeteksi bot
+    page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    return context, page
+
 # Global worker reference & lock
 _current_worker = None
 _lock = threading.Lock()

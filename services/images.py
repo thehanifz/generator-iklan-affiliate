@@ -1,7 +1,11 @@
 """Generate gambar storyboard.
 
-Provider default: pollinations (gratis, tanpa API key).
-Alternatif: openai (model image, butuh LLM_API_KEY).
+Provider (diatur via IMAGE_PROVIDER di .env):
+- "openai" (default): API OpenAI-compatible, mis. 9Router text-to-image.
+  api_key = IMAGE_API_KEY atau LLM_API_KEY;
+  base_url = IMAGE_BASE_URL atau LLM_BASE_URL;
+  model = IMAGE_MODEL (default: ag/gemini-3.1-flash-image).
+- "pollinations": gratis, tanpa API key (model flux).
 Hasil disimpan ke path lokal oleh pemanggil via download().
 """
 import os

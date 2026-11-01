@@ -186,6 +186,10 @@ def process_job(job_id):
             character,
         )
         db.log(conn, job_id, f"Konsep & shot list jadi ({len(tasks['storyboards'])} storyboard).")
+        # foto referensi produk utama (dipilih user di dashboard) untuk image-to-image
+        ref_urls = (meta.get("photos") or [])[:2] if isinstance(meta, dict) else []
+        if ref_urls:
+            db.log(conn, job_id, f"Storyboard memakai {len(ref_urls)} foto referensi produk.")
         sb_files, sb_urls = [], []
         out_dir = os.path.join(C.OUTPUT_DIR, job_id)
         for sb in tasks["storyboards"]:
@@ -194,7 +198,7 @@ def process_job(job_id):
             local = os.path.join(out_dir, fname)
             db.log(conn, job_id, f"Generate {sb['label']} ({sb['grid']})...")
             conn.commit()
-            images_svc.download(sb["prompt"], local, grid=sb["grid"])
+            images_svc.download(sb["prompt"], local, grid=sb["grid"], ref_images=ref_urls)
             sb_files.append(local)
             db.log(conn, job_id, f"{sb['label']} selesai: {fname}")
             conn.commit()

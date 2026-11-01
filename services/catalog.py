@@ -85,7 +85,17 @@ def list_categories():
                 order.append(k)
             if s and s not in cats[k]:
                 cats[k].append(s)
-        return [{"kategori": k, "sub": cats[k]} for k in order]
+        # Hitung jumlah produk aktif per kategori
+        try:
+            prods = _all_products()
+            counts = {}
+            for p in prods:
+                pk = (p.get("kategori") or "").strip()
+                if pk:
+                    counts[pk] = counts.get(pk, 0) + 1
+        except Exception:
+            counts = {}
+        return [{"kategori": k, "sub": cats[k], "count": counts.get(k, 0)} for k in order]
 
     return _cached("categories", load)
 
@@ -178,6 +188,7 @@ def list_products(kategori=None, sub=None, q=None):
                 "sub": p["sub"],
                 "harga": p["harga"],
                 "thumb": _thumb_for(p),
+                    "link_shopee": p.get("link_shopee", ""), 
             }
         )
     return out

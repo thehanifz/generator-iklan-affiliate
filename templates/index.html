@@ -4,84 +4,185 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Generator Iklan &amp; Affiliate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/vendor/tom-select.default.min.css">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+
 <header class="topbar">
-  <h1>🎬 Generator Iklan &amp; Affiliate</h1>
-  <div class="topbar-right">
-    <span id="authBadge" class="badge hidden">🔒</span>
+  <div class="topbar-content">
+    <div class="brand">
+      <span class="brand-icon">🎬</span>
+      <div>
+        <h1>Generator Iklan &amp; Affiliate</h1>
+        <span class="brand-sub">Platform Otomasi Konten Katalog Database</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span id="authBadge" class="badge hidden">🔒</span>
+    </div>
   </div>
 </header>
 
-<main class="container">
+<main class="app-container">
 
-  <!-- ============ TAHAP 1: DASHBOARD ============ -->
+  <!-- ============ TAHAP 1: DASHBOARD (sidebar layout) ============ -->
   <section id="view-form" class="view">
-    <div class="card">
-      <h2>1. Pilih Produk <small>dari database katalog (maks 5)</small></h2>
-      <div class="mode-row">
-        <button type="button" id="modeIklan" class="mode-btn">📣 Bikin Iklan</button>
-        <button type="button" id="modeAffiliate" class="mode-btn active">🛍️ Bikin Affiliate</button>
-      </div>
+    <div class="stage-layout">
 
-      <div id="catPills" class="cat-pills"><div class="loading">Memuat kategori…</div></div>
-      <div class="dash-tools">
-        <select id="subSelect"><option value="">Semua sub-kategori</option></select>
-        <input type="text" id="searchInput" placeholder="🔍 Cari produk…">
-      </div>
-      <div id="selectBar" class="select-bar hidden">
-        <span id="selectCount">0/5 dipilih</span>
-        <span id="mainLabel" class="main-label"></span>
-        <button type="button" id="clearSelectBtn" class="btn small">Bersihkan</button>
-      </div>
-      <div id="productGrid" class="product-grid"><div class="loading">Memuat produk…</div></div>
+      <!-- ═══ SIDEBAR KIRI ═══ -->
+      <aside class="stage-sidebar">
+        <div class="sidebar-inner">
 
-      <div class="two-col">
-        <div>
-          <label>Foto Karakter</label>
-          <div class="char-row">
-            <select id="characterSelect"><option value="">— Tanpa karakter —</option></select>
-            <button type="button" id="charAddBtn" class="btn small">＋ Tambah</button>
+          <!-- Mode Toggle -->
+          <div class="sidebar-block">
+            <div class="sidebar-label">Jenis Konten</div>
+            <div class="mode-toggle">
+              <button type="button" id="modeAffiliate" class="mode-btn active">
+                <span class="mode-icon">🛍️</span>
+                <span>Affiliate</span>
+              </button>
+              <button type="button" id="modeIklan" class="mode-btn">
+                <span class="mode-icon">📣</span>
+                <span>Iklan</span>
+              </button>
+            </div>
           </div>
-          <div id="charList" class="char-list"></div>
-          <div id="charForm" class="hidden inline-form">
-            <input type="text" id="charName" placeholder="Nama karakter">
-            <input type="text" id="charDesc" placeholder="Deskripsi singkat (opsional)">
-            <input type="file" id="charPhoto" accept="image/*">
-            <button type="button" id="charSaveBtn" class="btn small primary">Simpan</button>
+
+          <div class="sidebar-divider"></div>
+
+          <!-- Kategori -->
+          <div class="sidebar-block">
+            <label for="catSelect" class="sidebar-label">Kategori Produk</label>
+            <select id="catSelect">
+              <option value="">— Pilih Kategori —</option>
+            </select>
+          </div>
+
+          <!-- Sub-Kategori -->
+          <div class="sidebar-block">
+            <label for="subSelect" class="sidebar-label">Sub-Kategori</label>
+            <select id="subSelect">
+              <option value="">Semua sub-kategori</option>
+            </select>
+          </div>
+
+          <div class="sidebar-divider"></div>
+
+          <!-- Karakter -->
+          <div class="sidebar-block">
+            <div class="sidebar-label-row">
+              <label for="characterSelect" class="sidebar-label">Karakter <span class="opt">opsional</span></label>
+              <button type="button" id="charAddBtn" class="btn btn-outline btn-xs">＋ Tambah</button>
+            </div>
+            <select id="characterSelect">
+              <option value="">— Tanpa karakter —</option>
+            </select>
+            <div id="charList" class="char-list"></div>
+
+            <!-- Form tambah karakter (hidden) -->
+            <div id="charForm" class="hidden inline-form">
+              <h4>Karakter Baru</h4>
+              <input type="text" id="charName" placeholder="Nama karakter (wajib)">
+              <input type="text" id="charDesc" placeholder="Deskripsi fisik/gaya">
+              <div class="file-input-wrapper">
+                <input type="file" id="charPhoto" accept="image/*">
+              </div>
+              <div class="inline-actions">
+                <button type="button" id="charCancelBtn" class="btn btn-sm">Batal</button>
+                <button type="button" id="charSaveBtn" class="btn btn-primary btn-sm">Simpan</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="sidebar-divider"></div>
+
+          <!-- Foto Tempat -->
+          <div class="sidebar-block">
+            <div class="sidebar-label">Foto Tempat <span class="opt">opsional</span></div>
+            <div class="upload-box upload-box-sm" id="placeBox">
+              <input type="file" id="placePhoto" accept="image/*" hidden>
+              <div class="upload-hint-sm">
+                <span>📷</span>
+                <span>Klik untuk unggah foto latar</span>
+              </div>
+              <img id="placePreview" class="hidden" alt="Pratinjau tempat">
+              <div id="placeName" class="file-name"></div>
+              <button type="button" id="placeRemove" class="btn btn-danger btn-xs hidden">✕ Hapus</button>
+            </div>
+          </div>
+
+          <!-- Spacer -->
+          <div class="sidebar-spacer"></div>
+
+          <!-- Seleksi info + tombol Next -->
+          <div class="sidebar-footer">
+            <div id="selectBar" class="select-bar-side hidden">
+              <div class="select-bar-count">
+                <span id="selectCount" class="select-badge">0 / 5</span>
+                <span class="select-label-text">produk dipilih</span>
+              </div>
+              <div id="mainLabel" class="main-label-side"></div>
+              <button type="button" id="clearSelectBtn" class="btn btn-outline btn-xs">✕ Bersihkan</button>
+            </div>
+            <div id="formError" class="alert-box error hidden"></div>
+            <button type="button" id="resetBtn" class="btn btn-outline btn-full">↺ Reset Form</button>
+            <button type="button" id="nextBtn" class="btn btn-primary btn-full btn-lg">
+              Lanjutkan ke Pilih Foto →
+            </button>
+          </div>
+
+        </div>
+      </aside>
+
+      <!-- ═══ MAIN CONTENT KANAN ═══ -->
+      <div class="stage-main">
+        <div class="main-header">
+          <div>
+            <h2 class="main-title">Pilih Produk Katalog</h2>
+            <p class="main-desc">Pilih kategori, lalu centang produk yang ingin dijadikan konten <strong>(maks. 5)</strong>.</p>
           </div>
         </div>
-        <div>
-          <label>Foto Tempat <span class="opt">(opsional)</span></label>
-          <div class="upload-box" id="placeBox">
-            <input type="file" id="placePhoto" accept="image/*" hidden>
-            <div class="upload-hint">📷 Pilih foto tempat</div>
-            <img id="placePreview" class="hidden" alt="pratinjau tempat">
-            <div id="placeName" class="file-name"></div>
-            <button type="button" id="placeRemove" class="btn small hidden">✕ Hapus</button>
+
+        <!-- Search bar -->
+        <div class="main-search">
+          <div class="search-input-wrap">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="searchInput" placeholder="Cari nama produk...">
+          </div>
+        </div>
+
+        <!-- Grid produk -->
+        <div id="productGrid" class="product-grid">
+          <div class="empty-state">
+            <div class="empty-icon">📁</div>
+            <h3>Pilih Kategori Produk</h3>
+            <p>Silakan pilih kategori dari panel kiri untuk memuat daftar produk.</p>
           </div>
         </div>
       </div>
 
-      <div class="form-actions">
-        <button type="button" id="resetBtn" class="btn">Reset</button>
-        <button type="button" id="nextBtn" class="btn primary">Lanjutkan →</button>
-      </div>
-      <div id="formError" class="error hidden"></div>
     </div>
   </section>
 
   <!-- ============ TAHAP 2: PILIH FOTO ============ -->
   <section id="view-preview" class="view hidden">
     <div class="card">
-      <h2>2. Pilih Foto <small>foto dari folder Drive tiap produk</small></h2>
+      <div class="card-header">
+        <div>
+          <h2>2. Pilih Foto Produk</h2>
+          <p class="section-desc">Pilih foto dari folder Google Drive untuk dimasukkan ke dalam storyboard promosi.</p>
+        </div>
+      </div>
       <div id="photoSections"></div>
       <div class="form-actions">
-        <button type="button" id="backBtn" class="btn">← Kembali</button>
-        <button type="button" id="processBtn" class="btn primary">Proses →</button>
+        <button type="button" id="backBtn" class="btn btn-outline">← Kembali ke Katalog</button>
+        <button type="button" id="processBtn" class="btn btn-primary btn-lg">Mulai Proses Storyboard →</button>
       </div>
-      <div id="previewError" class="error hidden"></div>
+      <div id="previewError" class="alert-box error hidden"></div>
     </div>
   </section>
 
@@ -89,20 +190,22 @@
   <section id="view-process" class="view hidden">
     <div class="card">
       <div class="process-head">
-        <div class="gear">⚙️</div>
+        <div class="gear-spinner">⚙️</div>
         <h2 id="processTitle">Memproses Konten Anda</h2>
-        <p id="processSub">Mohon tunggu, sistem sedang bekerja…</p>
+        <p id="processSub" class="section-desc">Mohon tunggu, AI sedang menyusun konsep dan prompt video…</p>
       </div>
       <div class="progress-wrap">
         <div class="progress-bar"><div id="progressFill"></div></div>
-        <span id="progressPct">0%</span>
+        <span id="progressPct" class="progress-pct">0%</span>
       </div>
       <ul id="checklist" class="checklist"></ul>
-      <h3>Log Proses</h3>
-      <div id="logPanel" class="log-panel"></div>
+      <div class="log-section">
+        <div class="log-header"><span>Log Proses Real-Time</span></div>
+        <div id="logPanel" class="log-panel"></div>
+      </div>
       <div class="form-actions">
-        <button type="button" id="retryBtn" class="btn hidden">🔄 Coba Lagi</button>
-        <button type="button" id="newJobBtn" class="btn hidden">＋ Buat Baru</button>
+        <button type="button" id="retryBtn" class="btn btn-outline hidden">🔄 Coba Lagi</button>
+        <button type="button" id="newJobBtn" class="btn btn-primary hidden">＋ Buat Proyek Baru</button>
       </div>
     </div>
   </section>
@@ -110,19 +213,37 @@
   <!-- ============ TAHAP 4: HASIL ============ -->
   <section id="view-result" class="view hidden">
     <div class="card">
-      <div class="success-banner">✅ <b>Proses selesai!</b><br><small>Storyboard dan prompt video berhasil dibuat.</small></div>
-      <h2>Storyboard <button type="button" id="dlStoryboardBtn" class="btn small primary">⬇ Unduh Storyboard</button></h2>
-      <div id="storyboards" class="storyboards"></div>
-      <h2>Prompt Video (Lengkap) <button type="button" id="copyPromptBtn" class="btn small">📋 Salin Prompt</button></h2>
-      <pre id="promptText" class="prompt-box"></pre>
-      <div class="form-actions">
-        <button type="button" id="resultNewBtn" class="btn primary">＋ Buat Baru</button>
+      <div class="success-banner">
+        <span class="banner-icon">🎉</span>
+        <div>
+          <h3>Proses Selesai Berhasil!</h3>
+          <p>Storyboard dan prompt video siap digunakan untuk materi promosi.</p>
+        </div>
+      </div>
+      <div class="result-block">
+        <div class="result-header">
+          <h2>Storyboard Visual</h2>
+          <button type="button" id="dlStoryboardBtn" class="btn btn-primary btn-sm">⬇ Unduh Storyboard</button>
+        </div>
+        <div id="storyboards" class="storyboards"></div>
+      </div>
+      <div class="result-block">
+        <div class="result-header">
+          <h2>Prompt Video Lengkap</h2>
+          <button type="button" id="copyPromptBtn" class="btn btn-outline btn-sm">📋 Salin Prompt</button>
+        </div>
+        <pre id="promptText" class="prompt-box"></pre>
+      </div>
+      <div class="form-actions center">
+        <button type="button" id="resultNewBtn" class="btn btn-primary btn-lg">＋ Buat Konten Lainnya</button>
       </div>
     </div>
   </section>
 
 </main>
+
 <div id="toast" class="toast hidden"></div>
+<script src="/static/vendor/tom-select.complete.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

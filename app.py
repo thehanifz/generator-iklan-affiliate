@@ -75,6 +75,28 @@ def api_catalog_products():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@app.route("/api/drive-image/<file_id>")
+def api_drive_image(file_id):
+    """Proxy image dari Google Drive via service account agar bebas CORS / rate limit."""
+    import io
+    from flask import send_file, Response
+    download = request.args.get("download")
+    try:
+        svc = catalog._drive()
+        req = svc.files().get_media(fileId=file_id)
+        content = req.execute()
+        as_attachment = bool(download)
+        filename = f"{file_id}.jpg"
+        return send_file(
+            io.BytesIO(content),
+            mimetype="image/jpeg",
+            as_attachment=as_attachment,
+            download_name=filename if as_attachment else None
+        )
+    except Exception as e:
+        return Response(f"Error fetching image: {e}", status=502)
+
+
 @app.route("/api/catalog/products/<pid>/photos")
 @require_token
 def api_catalog_photos(pid):

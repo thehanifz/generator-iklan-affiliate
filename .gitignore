@@ -4,8 +4,11 @@
 __pycache__/
 *.png
 data/shopee_cookies.json
+service-account.json
+*-account.json
 test_*.py
 check_*.py
 find_*.py
 debug_*.py
 inspect_*.py
+data/outputs/

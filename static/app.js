@@ -15,15 +15,20 @@ function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.rem
 function show(view) { document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden")); $(view).classList.remove("hidden"); window.scrollTo(0, 0); }
 function errBox(id, msg) { const e = $(id); if (!msg) { e.classList.add("hidden"); return; } e.textContent = msg; e.classList.remove("hidden"); }
 
-/* ========== Shopee QR Login ========== */
-let qrPollTimer = null;
-let qrCountdownTimer = null;
-let currentQrId = null;
+/* ========== Shopee Manual Login ========== */
+let manualPollTimer = null;
+let currentManualSessionId = null;
 
 async function checkShopeeStatus() {
   try {
     const j = await api("/api/shopee/status");
     updateShopeeUI(j.logged_in);
+    if (j.shopee_user && $("shopeeInputUser") && !$("shopeeInputUser").value) {
+      $("shopeeInputUser").value = j.shopee_user;
+    }
+    if (j.has_credentials && $("shopeeInputPass")) {
+      $("shopeeInputPass").placeholder = "•••••••• (sudah terisi dari .env)";
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -39,132 +44,112 @@ function updateShopeeUI(loggedIn) {
   }
 }
 
-$("shopeeLoginBtn").onclick = async () => {
-  $("qrModal").classList.remove("hidden");
-  await loadQR();
+$("shopeeLoginBtn").onclick = () => {
+  $("shopeeModal").classList.remove("hidden");
+  $("manualLoginStatus").classList.add("hidden");
+  $("manualLoginInstruction").classList.add("hidden");
+  $("startManualLoginBtn").disabled = false;
+  $("startManualLoginBtn").textContent = "🚀 Buka Browser & Login";
 };
 
-$("qrCloseBtn").onclick = () => closeQRModal();
-$("qrModal").onclick = (e) => { if (e.target === $("qrModal")) closeQRModal(); };
+$("shopeeModalCloseBtn").onclick = () => closeShopeeModal();
+$("shopeeModal").onclick = (e) => { if (e.target === $("shopeeModal")) closeShopeeModal(); };
 
-function closeQRModal() {
-  $("qrModal").classList.add("hidden");
-  if (qrPollTimer) { clearInterval(qrPollTimer); qrPollTimer = null; }
-  if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
-  if (currentQrId) {
-    api("/api/shopee/qr/cancel", {
+function closeShopeeModal() {
+  $("shopeeModal").classList.add("hidden");
+  if (manualPollTimer) { clearInterval(manualPollTimer); manualPollTimer = null; }
+  if (currentManualSessionId) {
+    api("/api/shopee/login/manual/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ qrcode_id: currentQrId }),
+      body: JSON.stringify({ session_id: currentManualSessionId }),
     }).catch(() => {});
-    currentQrId = null;
+    currentManualSessionId = null;
   }
 }
 
-$("qrRefreshBtn").onclick = async () => {
-  if (qrPollTimer) { clearInterval(qrPollTimer); qrPollTimer = null; }
-  if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
-  await loadQR();
-};
+$("startManualLoginBtn").onclick = async () => {
+  const username = $("shopeeInputUser") ? $("shopeeInputUser").value.trim() : "";
+  const password = $("shopeeInputPass") ? $("shopeeInputPass").value.trim() : "";
 
-async function loadQR() {
-  $("qrLoading").classList.remove("hidden");
-  $("qrLoading").textContent = "Memuat QR Code...";
-  $("qrImageWrap").classList.add("hidden");
-  $("qrTimer").classList.add("hidden");
-  $("qrInstruction").classList.add("hidden");
-  $("qrRefreshBtn").classList.add("hidden");
-  $("qrStatusMsg").textContent = "";
-  $("qrStatusMsg").className = "qr-status-msg";
-
-  if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
+  const statusBox = $("manualLoginStatus");
+  statusBox.textContent = "⏳ Membuka peramban Chrome di desktop Anda...";
+  statusBox.className = "qr-status-msg scanning";
+  statusBox.classList.remove("hidden");
+  $("manualLoginInstruction").classList.remove("hidden");
+  $("startManualLoginBtn").disabled = true;
+  $("startManualLoginBtn").textContent = "Browser Aktif...";
 
   try {
-    const j = await api("/api/shopee/qr", { method: "POST" });
-    if (!j.ok) throw new Error(j.error || "Gagal generate QR");
+    const j = await api("/api/shopee/login/manual", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
 
-    currentQrId = j.qrcode_id;
-    $("qrImage").src = "data:image/png;base64," + j.qrcode_base64;
-    $("qrLoading").classList.add("hidden");
-    $("qrImageWrap").classList.remove("hidden");
-    $("qrTimer").classList.remove("hidden");
-    $("qrInstruction").classList.remove("hidden");
+    if (!j.ok) throw new Error(j.error || "Gagal memulai browser");
+    currentManualSessionId = j.session_id;
 
-    // Countdown 60 detik
-    let timeLeft = 60;
-    $("qrTimerCount").textContent = timeLeft;
-    qrCountdownTimer = setInterval(() => {
-      timeLeft--;
-      if (timeLeft <= 0) {
-        clearInterval(qrCountdownTimer);
-        qrCountdownTimer = null;
-        $("qrTimer").classList.add("hidden");
-        $("qrStatusMsg").textContent = "⏰ QR Code kedaluwarsa. Silakan buat QR baru.";
-        $("qrStatusMsg").className = "qr-status-msg expired";
-        $("qrRefreshBtn").classList.remove("hidden");
-      } else {
-        $("qrTimerCount").textContent = timeLeft;
-      }
-    }, 1000);
-
-    // Start polling status
-    startQRPolling(j.qrcode_id);
+    startManualPolling(j.session_id);
   } catch (e) {
-    $("qrLoading").textContent = "Gagal memuat QR: " + e.message;
-    $("qrRefreshBtn").classList.remove("hidden");
+    statusBox.textContent = "❌ " + e.message;
+    statusBox.className = "qr-status-msg expired";
+    $("startManualLoginBtn").disabled = false;
+    $("startManualLoginBtn").textContent = "Coba Lagi";
   }
-}
+};
 
-function startQRPolling(qrId) {
-  if (qrPollTimer) clearInterval(qrPollTimer);
+function startManualPolling(sessionId) {
+  if (manualPollTimer) clearInterval(manualPollTimer);
   let attempts = 0;
-  const maxAttempts = 60; // polling tiap 2 dtk
+  const maxAttempts = 150; // max 5 menit (polling tiap 2 detik)
 
   const tick = async () => {
     attempts++;
     if (attempts > maxAttempts) {
-      clearInterval(qrPollTimer);
-      qrPollTimer = null;
-      if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
-      $("qrStatusMsg").textContent = "⏰ QR Code kedaluwarsa";
-      $("qrStatusMsg").className = "qr-status-msg expired";
-      $("qrRefreshBtn").classList.remove("hidden");
+      clearInterval(manualPollTimer);
+      manualPollTimer = null;
+      $("manualLoginStatus").textContent = "⏰ Waktu login habis.";
+      $("manualLoginStatus").className = "qr-status-msg expired";
+      $("startManualLoginBtn").disabled = false;
+      $("startManualLoginBtn").textContent = "Buka Browser Lagi";
       return;
     }
+
     try {
-      const j = await api("/api/shopee/qr/check", {
+      const j = await api("/api/shopee/login/manual/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qrcode_id: qrId }),
+        body: JSON.stringify({ session_id: sessionId }),
       });
 
-      if (j.status === "SCANNED") {
-        $("qrStatusMsg").textContent = "📱 QR di-scan! Konfirmasi di HP Anda...";
-        $("qrStatusMsg").className = "qr-status-msg scanning";
-      } else if (j.status === "CONFIRMED") {
-        clearInterval(qrPollTimer);
-        qrPollTimer = null;
-        if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
-        $("qrTimer").classList.add("hidden");
-        $("qrStatusMsg").textContent = "✅ Login berhasil!";
-        $("qrStatusMsg").className = "qr-status-msg success";
+      if (j.status === "CONFIRMED" || j.logged_in) {
+        clearInterval(manualPollTimer);
+        manualPollTimer = null;
+        $("manualLoginStatus").textContent = "✅ Login berhasil! Menyimpan cookies...";
+        $("manualLoginStatus").className = "qr-status-msg success";
         updateShopeeUI(true);
-        setTimeout(() => closeQRModal(), 1500);
+        setTimeout(() => closeShopeeModal(), 1500);
         toast("Login Shopee berhasil!");
-      } else if (j.status === "EXPIRED" || j.status === "ERROR") {
-        clearInterval(qrPollTimer);
-        qrPollTimer = null;
-        if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
-        $("qrTimer").classList.add("hidden");
-        $("qrStatusMsg").textContent = "⏰ " + (j.error || "QR Code kedaluwarsa");
-        $("qrStatusMsg").className = "qr-status-msg expired";
-        $("qrRefreshBtn").classList.remove("hidden");
+      } else if (j.status === "CANCELLED") {
+        clearInterval(manualPollTimer);
+        manualPollTimer = null;
+        $("manualLoginStatus").textContent = "Jendela browser ditutup.";
+        $("manualLoginStatus").className = "qr-status-msg";
+        $("startManualLoginBtn").disabled = false;
+        $("startManualLoginBtn").textContent = "Buka Browser & Login";
+      } else if (j.status === "ERROR") {
+        clearInterval(manualPollTimer);
+        manualPollTimer = null;
+        $("manualLoginStatus").textContent = "❌ " + (j.error || "Gagal login");
+        $("manualLoginStatus").className = "qr-status-msg expired";
+        $("startManualLoginBtn").disabled = false;
+        $("startManualLoginBtn").textContent = "Buka Browser Lagi";
       }
     } catch (e) { /* tunggu tick berikutnya */ }
   };
 
-  tick();
-  qrPollTimer = setInterval(tick, 2000);
+  manualPollTimer = setInterval(tick, 2000);
 }
 
 $("shopeeLogoutBtn").onclick = async () => {
@@ -333,49 +318,60 @@ $("processBtn").onclick = async () => {
   fd.append("product_title", title);
   fd.append("product_price", price);
 
+  // Jika user mengupload foto produk sendiri, kirimkan file
   if (state.productPhotoFile) {
     fd.append("product_photo", state.productPhotoFile);
   } else if (state.preview && state.preview.image) {
     fd.append("product_image", state.preview.image);
   }
 
+  $("processBtn").disabled = true;
   try {
     const j = await api("/api/jobs", { method: "POST", body: fd });
+    state.jobId = j.job_id;
+    show("view-process");
     startPolling(j.job_id);
-  } catch (e) { errBox("previewError", e.message); }
+  } catch (e) {
+    errBox("previewError", e.message);
+  } finally {
+    $("processBtn").disabled = false;
+  }
 };
-function renderChecklist(currentStage, status) {
-  const ul = $("checklist"); ul.innerHTML = "";
-  STAGES.forEach((s, i) => {
-    const li = document.createElement("li");
-    let cls = "st-wait";
-    if (status === "gagal" && i + 1 === currentStage) cls = "st-fail";
-    else if (status === "story board ready") cls = "st-done";
-    else if (i + 1 < currentStage) cls = "st-done";
-    else if (i + 1 === currentStage) cls = "st-run";
-    li.className = cls; li.textContent = `${i + 1}. ${s}`; ul.appendChild(li);
-  });
-}
+
+/* ---------- polling proses ---------- */
 function startPolling(jobId) {
-  state.jobId = jobId; state.lastLogId = 0; $("logPanel").innerHTML = "";
-  $("retryBtn").classList.add("hidden"); $("newJobBtn").classList.add("hidden");
-  $("processTitle").textContent = "Memproses Konten Anda"; $("processSub").textContent = "Mohon tunggu, sistem sedang bekerja…";
-  show("view-process");
-  clearInterval(state.pollTimer);
+  if (state.pollTimer) clearInterval(state.pollTimer);
+  state.lastLogId = 0;
+  $("retryBtn").classList.add("hidden");
+  $("newJobBtn").classList.add("hidden");
+
   const tick = async () => {
     try {
-      const j = await api(`/api/jobs/${jobId}`);
-      const job = j.job;
-      $("progressFill").style.width = job.progress + "%"; $("progressPct").textContent = job.progress + "%";
-      renderChecklist(job.current_stage, job.status);
-      const lj = await api(`/api/jobs/${jobId}/logs?since=${state.lastLogId}`);
+      const [jJob, jLogs] = await Promise.all([api(`/api/jobs/${jobId}`), api(`/api/jobs/${jobId}/logs?since=${state.lastLogId}`)]);
+      const job = jJob.job;
+      $("progressFill").style.width = `${job.progress || 0}%`;
+      $("progressPct").textContent = `${job.progress || 0}%`;
+      $("processSub").textContent = job.status === "antrean" ? "Menunggu giliran…" : job.status;
+
+      // checklist
+      const ul = $("checklist"); ul.innerHTML = "";
+      STAGES.forEach((name, idx) => {
+        const step = idx + 1;
+        const li = document.createElement("li");
+        if (step < job.current_stage || job.status === "story board ready") li.className = "done";
+        else if (step === job.current_stage) li.className = "current";
+        li.textContent = `${step}. ${name}`;
+        ul.appendChild(li);
+      });
+
+      // logs
       const panel = $("logPanel");
-      lj.logs.forEach((l) => {
+      (jLogs.logs || []).forEach((l) => {
         state.lastLogId = Math.max(state.lastLogId, l.id);
-        const div = document.createElement("div");
-        if (l.level === "error") div.className = "err"; else if (l.level === "warning") div.className = "warn";
-        div.textContent = `${l.ts.slice(11, 19)} — ${l.message}`;
-        panel.appendChild(div);
+        const p = document.createElement("p");
+        p.className = `log-${l.level || "info"}`;
+        p.textContent = `[${l.ts.slice(11, 19)}] ${l.message}`;
+        panel.appendChild(p);
       });
       panel.scrollTop = panel.scrollHeight;
       if (job.status === "story board ready") { clearInterval(state.pollTimer); showResult(jobId); }

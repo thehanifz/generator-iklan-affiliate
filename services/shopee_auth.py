@@ -1,19 +1,18 @@
-"""Login Shopee via QR Code menggunakan Headless Chrome (Playwright).
+"""Login Shopee via Akun Manual (Playwright Chrome) & QR Code.
 
-Alur:
-1. generate_qr():
-   - Menjalankan headless Chrome via Playwright.
-   - Membuka https://shopee.co.id/buyer/login/qr dengan sidik jari peramban nyata.
-   - Menangkap gambar QR code (data base64) dari elemen halaman.
-   - Mengembalikan {qrcode_id, qrcode_base64}.
-2. check_status(qr_id):
-   - Polling status login: NEW -> SCANNED -> CONFIRMED / EXPIRED.
-   - Saat user konfirmasi di aplikasi Shopee HP:
-     Deteksi cookies SPC_EC / SPC_U atau redirect keluar dari halaman login.
-   - Simpan cookies ke data/shopee_cookies.json.
-   - Tutup sesi browser Chrome.
-3. cancel_qr(qr_id):
-   - Membatalkan dan menutup sesi headless browser jika user menutup modal.
+Alur Manual:
+1. start_manual_login(username, password):
+   - Membuka browser Chrome nyata (headed) ke https://shopee.co.id/buyer/login.
+   - Mengisi username & password secara otomatis (dari .env SHOPEE_USER / SHOPEE_PASS atau input UI).
+   - Mengklik tombol 'LOG IN'.
+   - Jika ada verifikasi (OTP SMS/WhatsApp/puzzle slider), pengguna dapat langsung
+     menyelesaikannya di jendela browser Chrome yang sedang terbuka.
+   - Begitu login berhasil, cookies sesi (SPC_EC, SPC_U, SPC_ST) otomatis disimpan
+     ke data/shopee_cookies.json dan jendela Chrome ditutup otomatis.
+2. check_manual_status(session_id):
+   - Polling status login manual: RUNNING -> CONFIRMED / EXPIRED / ERROR.
+3. cancel_manual_login(session_id):
+   - Membatalkan dan menutup sesi browser manual.
 """
 import base64
 import json
@@ -39,41 +38,36 @@ DESKTOP_UA = (
     "Chrome/130.0.0.0 Safari/537.36"
 )
 
-# Argumen Chromium anti-deteksi yang terbukti lolos WAF Shopee (dipakai QR login)
+# Argumen Chromium anti-deteksi yang terbukti lolos WAF Shopee
 STEALTH_ARGS = [
     "--disable-blink-features=AutomationControlled",
     "--no-sandbox",
     "--disable-setuid-sandbox",
     "--disable-infobars",
-    "--window-size=1280,800",
+    "--window-size=1280,850",
 ]
 
 
-def launch_stealth_browser(playwright):
-    """Luncurkan Chromium headless dengan fingerprint anti-deteksi bot.
-
-    Dipakai bersama oleh alur QR login dan fetch produk — satu fingerprint
-    yang sudah terbukti lolos WAF Shopee.
-    """
+def launch_stealth_browser(playwright, headless=True):
+    """Luncurkan Chromium headless/headed dengan fingerprint anti-deteksi bot."""
     browser = playwright.chromium.launch(
         channel="chrome",
-        headless=True,
+        headless=headless,
         args=STEALTH_ARGS,
     )
     return browser
 
 
 def new_stealth_context(browser):
-    """Buat browser context + inject cookies login Shopee yang tersimpan.
-
-    Mengembalikan (context, page) yang siap dipakai. Jika tidak ada cookies
-    tersimpan, context tetap dibuat tanpa cookies (tetap fingerprint asli).
-    """
+    """Buat browser context + inject cookies login Shopee yang tersimpan."""
     context = browser.new_context(
         user_agent=DESKTOP_UA,
-        viewport={"width": 1280, "height": 800},
+        viewport={"width": 1280, "height": 850},
         locale="id-ID",
     )
+    context.add_cookies([
+        {"name": "shopee_web_lang", "value": "id", "domain": ".shopee.co.id", "path": "/"},
+    ])
     cookies = load_cookies()
     if cookies:
         context.add_cookies([
@@ -82,9 +76,9 @@ def new_stealth_context(browser):
             if isinstance(v, str) and v
         ])
     page = context.new_page()
-    # Hapus flag webdriver agar tidak terdeteksi bot
     page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return context, page
+
 
 # Global worker reference & lock
 _current_worker = None
@@ -135,7 +129,7 @@ def clear_cookies():
 def is_logged_in():
     """Cek apakah ada cookies sesi Shopee yang tersimpan."""
     c = load_cookies()
-    return bool(c and (c.get("SPC_EC") or c.get("SPC_U")))
+    return bool(c and (c.get("SPC_EC") or c.get("SPC_U") or c.get("SPC_ST")))
 
 
 def get_session():
@@ -153,7 +147,159 @@ def get_session():
     return s
 
 
-# ---- Playwright Worker Thread ----
+# ---- Manual Login Worker Thread ----
+
+class ShopeeManualLoginWorker(threading.Thread):
+    def __init__(self, session_id, username=None, password=None):
+        super().__init__(daemon=True, name=f"ShopeeManualLogin-{session_id}")
+        self.session_id = session_id
+        self.username = username or C.SHOPEE_USER
+        self.password = password or C.SHOPEE_PASS
+        self.ready_event = threading.Event()
+        self.stop_requested = False
+
+        self.status = "STARTING"  # STARTING, RUNNING, CONFIRMED, ERROR, CANCELLED
+        self.logged_in = False
+        self.error = None
+        self.cookies = {}
+
+    def run(self):
+        playwright = None
+        browser = None
+        try:
+            playwright = sync_playwright().start()
+            # Buka browser Chrome dengan headless=False agar pengguna bisa melihat layar
+            # dan menyelesaikan verifikasi OTP / SMS / WhatsApp / puzzle jika diminta.
+            browser = playwright.chromium.launch(
+                channel="chrome",
+                headless=False,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-infobars",
+                    "--window-size=1280,850",
+                ],
+            )
+            context = browser.new_context(
+                user_agent=DESKTOP_UA,
+                viewport={"width": 1280, "height": 850},
+                locale="id-ID",
+            )
+            context.add_cookies([
+                {"name": "shopee_web_lang", "value": "id", "domain": ".shopee.co.id", "path": "/"},
+            ])
+            page = context.new_page()
+            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+            page.goto("https://shopee.co.id/buyer/login", wait_until="networkidle", timeout=45000)
+
+            # Tutup popup pilihan bahasa jika ada
+            try:
+                page.evaluate("""() => {
+                    const buttons = Array.from(document.querySelectorAll('button, div, [role="button"]'));
+                    for (const b of buttons) {
+                        if (b.textContent.trim() === 'Bahasa Indonesia') {
+                            b.click();
+                            break;
+                        }
+                    }
+                    document.querySelectorAll('.SqO999, .UsynuF, .pEpvVk, [class*="shopee-popup"]').forEach(m => m.remove());
+                }""")
+                page.wait_for_timeout(400)
+            except Exception:
+                pass
+
+            # Isi input username & password jika ada
+            if self.username:
+                try:
+                    user_input = page.wait_for_selector(
+                        "input[name='loginKey'], input[placeholder*='Handphone'], input[placeholder*='Username'], input[placeholder*='Email']",
+                        timeout=10000,
+                    )
+                    if user_input:
+                        user_input.fill(self.username)
+                        page.wait_for_timeout(300)
+                except Exception as e:
+                    logger.warning("Gagal mengisi username Shopee: %s", e)
+
+            if self.password:
+                try:
+                    pass_input = page.wait_for_selector(
+                        "input[name='password'], input[type='password']",
+                        timeout=6000,
+                    )
+                    if pass_input:
+                        pass_input.fill(self.password)
+                        page.wait_for_timeout(300)
+                except Exception as e:
+                    logger.warning("Gagal mengisi password Shopee: %s", e)
+
+            # Jika username & password lengkap, klik tombol Log In
+            if self.username and self.password:
+                try:
+                    btn = page.query_selector("button:has-text('LOG IN'), button:has-text('Log In'), button[type='submit']")
+                    if btn:
+                        btn.click()
+                        page.wait_for_timeout(1000)
+                except Exception as e:
+                    logger.warning("Gagal klik tombol login Shopee: %s", e)
+
+            self.status = "RUNNING"
+            self.ready_event.set()
+
+            # Pantau sesi sampai login berhasil (maksimal 300 detik = 5 menit)
+            start_time = time.time()
+            while not self.stop_requested and (time.time() - start_time < 300):
+                page.wait_for_timeout(1000)
+
+                # Jika pengguna menutup browser Chrome secara manual
+                try:
+                    if page.is_closed():
+                        if not self.logged_in:
+                            self.status = "CANCELLED"
+                        break
+                except Exception:
+                    break
+
+                curr_cookies = context.cookies()
+                cookie_map = {c["name"]: c["value"] for c in curr_cookies}
+                curr_url = page.url
+
+                is_auth_cookie = bool(cookie_map.get("SPC_EC") or cookie_map.get("SPC_U") or cookie_map.get("SPC_ST"))
+                is_redirected = ("shopee.co.id" in curr_url and "/buyer/login" not in curr_url and cookie_map.get("SPC_F"))
+
+                if is_auth_cookie or is_redirected:
+                    self.cookies = cookie_map
+                    save_cookies(cookie_map)
+                    self.status = "CONFIRMED"
+                    self.logged_in = True
+                    # Beri jeda 1 detik agar pengguna melihat tanda sukses sebelum ditutup
+                    page.wait_for_timeout(1000)
+                    break
+
+            if not self.logged_in and self.status not in ("CONFIRMED", "CANCELLED"):
+                self.status = "EXPIRED"
+
+        except Exception as e:
+            self.error = str(e)
+            self.status = "ERROR"
+            self.ready_event.set()
+        finally:
+            if browser:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+            if playwright:
+                try:
+                    playwright.stop()
+                except Exception:
+                    pass
+
+    def stop(self):
+        self.stop_requested = True
+
+
+# ---- QR Login Worker Thread ----
 
 class ShopeeQRWorker(threading.Thread):
     def __init__(self, session_id):
@@ -187,51 +333,70 @@ class ShopeeQRWorker(threading.Thread):
             context = browser.new_context(
                 user_agent=DESKTOP_UA,
                 viewport={"width": 1280, "height": 800},
+                locale="id-ID",
             )
+            context.add_cookies([
+                {"name": "shopee_web_lang", "value": "id", "domain": ".shopee.co.id", "path": "/"},
+            ])
             page = context.new_page()
-            # Hapus flag webdriver agar tidak terdeteksi bot
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
+            # Tangkap langsung QR code murni dari respons resmi API Shopee
+            captured_qr = {"b64": None, "id": None}
+            def on_response(res):
+                if "gen_qrcode" in res.url:
+                    try:
+                        data = res.json()
+                        d = data.get("data") or {}
+                        if d.get("qrcode_base64"):
+                            captured_qr["b64"] = d["qrcode_base64"]
+                        if d.get("qrcode_id"):
+                            captured_qr["id"] = d["qrcode_id"]
+                    except Exception:
+                        pass
+
+            page.on("response", on_response)
             page.goto("https://shopee.co.id/buyer/login/qr", wait_until="networkidle", timeout=30000)
 
-            # Tutup popup pilihan bahasa jika muncul
+            # Klik tombol 'Bahasa Indonesia' pada popup jika ada
             try:
-                lang_btn = page.query_selector("button:has-text('Bahasa Indonesia')")
-                if lang_btn:
-                    lang_btn.click()
-                    page.wait_for_timeout(600)
+                page.evaluate("""() => {
+                    const buttons = Array.from(document.querySelectorAll('button, div, [role="button"]'));
+                    for (const b of buttons) {
+                        if (b.textContent.trim() === 'Bahasa Indonesia') {
+                            b.click();
+                            break;
+                        }
+                    }
+                    document.querySelectorAll('.SqO999, .UsynuF, .pEpvVk, [class*="shopee-popup"]').forEach(m => m.remove());
+                }""")
             except Exception:
                 pass
 
-            # Tunggu elemen QR Code muncul
-            page.wait_for_selector(".zFPfur, [class*='qrcode'], canvas", timeout=15000)
-            page.wait_for_timeout(400)
-
-            # 1. Screenshot elemen QR container (menghasilkan gambar lengkap dengan logo Shopee resmi di tengah)
-            qr_b64 = None
-            el = (
-                page.query_selector(".zFPfur")
-                or page.query_selector(".lnKhB7")
-                or page.query_selector("[class*='qrcode']")
-            )
-            if el:
+            qr_b64 = captured_qr["b64"]
+            if not qr_b64:
                 try:
-                    png_bytes = el.screenshot(type="png")
-                    qr_b64 = base64.b64encode(png_bytes).decode("utf-8")
+                    qr_b64 = page.evaluate("""() => {
+                        const el = document.querySelector('.zFPfur') || document.querySelector('[class*="zFPfur"]');
+                        if (el) {
+                            const style = el.getAttribute('style') || '';
+                            const m = style.match(/data:image\\/png;base64,([^"\\)]+)/);
+                            if (m) return m[1];
+                        }
+                        return null;
+                    }""")
                 except Exception:
                     pass
 
-            # 2. Fallback ambil dari style background-image .zFPfur
             if not qr_b64:
-                qr_b64 = page.evaluate("""() => {
-                    const el = document.querySelector('.zFPfur') || document.querySelector('[class*="zFPfur"]');
-                    if (el) {
-                        const style = el.getAttribute('style') || '';
-                        const m = style.match(/data:image\\/png;base64,([^"\\)]+)/);
-                        if (m) return m[1];
-                    }
-                    return null;
-                }""")
+                try:
+                    page.wait_for_selector(".zFPfur, [class*='qrcode'], canvas", timeout=5000)
+                    el = page.query_selector(".zFPfur") or page.query_selector("[class*='qrcode']")
+                    if el:
+                        png_bytes = el.screenshot(type="png")
+                        qr_b64 = base64.b64encode(png_bytes).decode("utf-8")
+                except Exception:
+                    pass
 
             if not qr_b64:
                 raise RuntimeError("Elemen QR Code tidak ditemukan pada halaman Shopee.")
@@ -240,18 +405,14 @@ class ShopeeQRWorker(threading.Thread):
             self.status = "NEW"
             self.ready_event.set()
 
-            # Loop pemantauan login (maks 150 detik)
             start_time = time.time()
             while not self.stop_requested and (time.time() - start_time < 150):
                 page.wait_for_timeout(1000)
-
-                # Ambil cookies terbaru dari browser context
                 curr_cookies = context.cookies()
                 cookie_map = {c["name"]: c["value"] for c in curr_cookies}
                 curr_url = page.url
 
-                # Cek tanda login sukses: ada SPC_EC atau SPC_U atau redirect keluar dari halaman login
-                is_auth_cookie = bool(cookie_map.get("SPC_EC") or cookie_map.get("SPC_U"))
+                is_auth_cookie = bool(cookie_map.get("SPC_EC") or cookie_map.get("SPC_U") or cookie_map.get("SPC_ST"))
                 is_redirected = ("shopee.co.id" in curr_url and "/buyer/login" not in curr_url and cookie_map.get("SPC_F"))
 
                 if is_auth_cookie or is_redirected:
@@ -261,7 +422,6 @@ class ShopeeQRWorker(threading.Thread):
                     self.logged_in = True
                     break
 
-                # Cek teks status pada halaman (SCANNED / EXPIRED)
                 try:
                     body_text = page.inner_text("body")
                     if any(w in body_text for w in ["Scan Berhasil", "Silakan konfirmasi", "di ponsel Anda", "dipindai"]):
@@ -296,7 +456,61 @@ class ShopeeQRWorker(threading.Thread):
         self.stop_requested = True
 
 
-# ---- Public API ----
+# ---- Public API (Manual & QR) ----
+
+def start_manual_login(username=None, password=None):
+    """Mulai proses login manual Shopee (membuka peramban Chrome)."""
+    global _current_worker
+
+    session_id = base64.b32encode(os.urandom(5)).decode("utf-8").lower()
+    with _lock:
+        if _current_worker and _current_worker.is_alive():
+            _current_worker.stop()
+        worker = ShopeeManualLoginWorker(session_id, username=username, password=password)
+        _current_worker = worker
+        worker.start()
+
+    if not worker.ready_event.wait(timeout=30):
+        worker.stop()
+        raise RuntimeError(worker.error or "Gagal membuka halaman login Shopee (timeout)")
+
+    if worker.error:
+        worker.stop()
+        raise RuntimeError(worker.error)
+
+    return {
+        "session_id": worker.session_id,
+        "status": worker.status,
+    }
+
+
+def check_manual_status(session_id):
+    """Polling status login manual. Kembalikan dict {status, logged_in}."""
+    with _lock:
+        worker = _current_worker
+
+    if is_logged_in():
+        return {"status": "CONFIRMED", "logged_in": True}
+
+    if not worker or worker.session_id != session_id:
+        return {"status": "EXPIRED", "logged_in": False, "error": "Sesi login tidak aktif"}
+
+    return {
+        "status": worker.status,
+        "logged_in": worker.logged_in,
+        "error": worker.error,
+    }
+
+
+def cancel_manual_login(session_id=None):
+    """Hentikan worker login manual."""
+    global _current_worker
+    with _lock:
+        if _current_worker:
+            if not session_id or _current_worker.session_id == session_id:
+                _current_worker.stop()
+                _current_worker = None
+
 
 def generate_qr():
     """Minta QR code baru via headless Chrome. Kembalikan {qrcode_id, qrcode_base64}."""
@@ -325,15 +539,11 @@ def generate_qr():
 
 
 def check_status(qr_id):
-    """Polling status QR login. Kembalikan dict {status, logged_in}.
-
-    status: NEW | SCANNED | CONFIRMED | EXPIRED | ERROR
-    """
+    """Polling status QR login. Kembalikan dict {status, logged_in}."""
     with _lock:
         worker = _current_worker
 
     if not worker or worker.session_id != qr_id:
-        # Jika session worker sudah selesai tapi user sudah berhasil login
         if is_logged_in():
             return {"status": "CONFIRMED", "logged_in": True}
         return {"status": "EXPIRED", "logged_in": False, "error": "Sesi QR tidak aktif"}
@@ -346,7 +556,7 @@ def check_status(qr_id):
 
 
 def cancel_qr(qr_id=None):
-    """Hentikan worker dan tutup browser Chrome."""
+    """Hentikan worker QR."""
     global _current_worker
     with _lock:
         if _current_worker:

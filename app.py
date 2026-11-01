@@ -259,11 +259,47 @@ def serve_output(fname):
     return send_from_directory(C.OUTPUT_DIR, fname)
 
 
-# ---------- Shopee QR Login ----------
+# ---------- Shopee Login (Manual & QR) ----------
 @app.route("/api/shopee/status")
 @require_token
 def api_shopee_status():
-    return jsonify({"ok": True, "logged_in": shopee_auth.is_logged_in()})
+    return jsonify({
+        "ok": True,
+        "logged_in": shopee_auth.is_logged_in(),
+        "has_credentials": bool(C.SHOPEE_USER and C.SHOPEE_PASS),
+        "shopee_user": C.SHOPEE_USER,
+    })
+
+
+@app.route("/api/shopee/login/manual", methods=["POST"])
+@require_token
+def api_shopee_login_manual():
+    body = request.get_json(force=True, silent=True) or {}
+    user = (body.get("username") or "").strip() or C.SHOPEE_USER
+    pwd = (body.get("password") or "").strip() or C.SHOPEE_PASS
+    try:
+        data = shopee_auth.start_manual_login(username=user, password=pwd)
+        return jsonify({"ok": True, **data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/shopee/login/manual/check", methods=["POST"])
+@require_token
+def api_shopee_login_manual_check():
+    body = request.get_json(force=True, silent=True) or {}
+    session_id = body.get("session_id", "")
+    result = shopee_auth.check_manual_status(session_id)
+    return jsonify({"ok": True, **result})
+
+
+@app.route("/api/shopee/login/manual/cancel", methods=["POST"])
+@require_token
+def api_shopee_login_manual_cancel():
+    body = request.get_json(force=True, silent=True) or {}
+    session_id = body.get("session_id")
+    shopee_auth.cancel_manual_login(session_id)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/shopee/qr", methods=["POST"])

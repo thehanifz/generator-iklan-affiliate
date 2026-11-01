@@ -17,35 +17,42 @@
   </div>
 </header>
 
-<!-- Modal QR Shopee -->
-<div id="qrModal" class="modal-overlay hidden">
+<!-- Modal Login Shopee (Manual Akun) -->
+<div id="shopeeModal" class="modal-overlay hidden">
   <div class="modal-box">
     <div class="modal-header">
-      <h3>🛒 Login Shopee via QR Code</h3>
-      <button type="button" id="qrCloseBtn" class="modal-close">✕</button>
+      <h3>🛒 Login Shopee (Akun Manual)</h3>
+      <button type="button" id="shopeeModalCloseBtn" class="modal-close">✕</button>
     </div>
-    <div class="modal-body">
-      <div id="qrLoading" class="qr-loading">Memuat QR Code...</div>
-      <div id="qrImageWrap" class="qr-image-wrap hidden">
-        <img id="qrImage" alt="QR Code Shopee" />
+    <div class="modal-body" style="text-align: left;">
+      <p style="font-size: 0.88rem; color: var(--muted); margin-top: 0;">
+        Login menggunakan akun Shopee Anda. Peramban Chrome akan otomatis dibuka untuk memproses login &amp; menyimpan sesi.
+      </p>
+
+      <div id="manualInputGroup">
+        <label style="font-size: 0.85rem; font-weight: 600; margin-bottom: 4px; display: block;">No. HP / Email / Username</label>
+        <input type="text" id="shopeeInputUser" placeholder="Masukkan username / No HP Shopee" style="margin-bottom: 10px; width: 100%;">
+
+        <label style="font-size: 0.85rem; font-weight: 600; margin-bottom: 4px; display: block;">Password</label>
+        <input type="password" id="shopeeInputPass" placeholder="Masukkan password Shopee" style="margin-bottom: 6px; width: 100%;">
+        <small style="color: var(--muted); display: block; margin-bottom: 14px;">
+          💡 Bisa disimpan permanen di file <code>.env</code> (<code>SHOPEE_USER</code> &amp; <code>SHOPEE_PASS</code>).
+        </small>
       </div>
-      <div id="qrTimer" class="qr-timer hidden" style="font-size: 0.85rem; color: #e67e22; font-weight: 600; margin-top: 6px;">
-        ⏳ Masa berlaku: <span id="qrTimerCount">60</span> detik
-      </div>
-      <div id="qrInstruction" class="qr-instruction hidden" style="text-align: left; font-size: 0.82rem; margin-top: 10px; background: #fff8f5; border: 1px solid #ffd8cc; padding: 10px; border-radius: 6px;">
-        <p style="font-weight: bold; margin: 0 0 6px 0; color: #d35400;">⚠️ Panduan Scan di HP:</p>
-        <ol style="margin: 0; padding-left: 18px; line-height: 1.45;">
-          <li>Buka <b>Aplikasi Shopee</b> di HP Anda.</li>
-          <li>Di halaman <b>Beranda</b>, ketuk ikon <b>[ - ] Scan</b> (di samping kolom pencarian).</li>
-          <li>Pastikan memilih mode <b>QR / Barcode</b> (<b>JANGAN</b> scan lewat menu ShopeePay / QRIS).</li>
-          <li>Arahkan kamera ke QR di atas, lalu ketuk <b>Konfirmasi Login</b>.</li>
+
+      <button type="button" id="startManualLoginBtn" class="btn primary" style="width: 100%;">🚀 Buka Browser &amp; Login</button>
+
+      <div id="manualLoginStatus" class="qr-status-msg hidden" style="margin-top: 14px;"></div>
+
+      <div id="manualLoginInstruction" class="hidden" style="text-align: left; font-size: 0.82rem; margin-top: 12px; background: #fff8f5; border: 1px solid #ffd8cc; padding: 12px; border-radius: 8px;">
+        <p style="font-weight: bold; margin: 0 0 6px 0; color: #d35400;">💡 Panduan di Browser Chrome:</p>
+        <ol style="margin: 0; padding-left: 18px; line-height: 1.5;">
+          <li>Jendela Chrome nyata telah terbuka di layar komputer Anda.</li>
+          <li>Akun diisi otomatis dan tombol login ditekan.</li>
+          <li>Jika Shopee meminta <b>Verifikasi OTP (WhatsApp/SMS)</b> atau <b>Geser Puzzle</b>, silakan selesaikan langsung di jendela Chrome tersebut.</li>
+          <li>Setelah login berhasil, cookies tersimpan dan jendela Chrome akan otomatis tertutup sendiri.</li>
         </ol>
-        <div style="margin-top: 6px; font-size: 0.78rem; color: #7f8c8d;">
-          *Jika muncul <i>"Kode QR salah"</i>, kode QR sudah kedaluwarsa atau salah menu scanner. Klik tombol <b>🔄 Buat QR Baru</b> di bawah lalu segera scan.
-        </div>
       </div>
-      <div id="qrStatusMsg" class="qr-status-msg"></div>
-      <button type="button" id="qrRefreshBtn" class="btn small hidden">🔄 Buat QR Baru</button>
     </div>
   </div>
 </div>

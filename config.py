@@ -19,6 +19,9 @@ class C:
     HOST = _get("HOST", "0.0.0.0")
     POLL_SECONDS = int(_get("WORKER_POLL_SECONDS", "5"))
 
+    SHOPEE_USER = _get("SHOPEE_USER", "") or _get("shopee_user", "")
+    SHOPEE_PASS = _get("SHOPEE_PASS", "") or _get("shopee_pass", "")
+
     GOOGLE_SA_FILE = _get("GOOGLE_SERVICE_ACCOUNT_FILE", "")
     SHEET_ID = _get("SHEET_ID", "")
     SHEET_TAB = _get("SHEET_TAB", "Sheet1")

@@ -2,7 +2,12 @@
 
 Jalankan:  python app.py   (atau: flask --app app run)
 UI:        http://localhost:5000/
+
+v2: produk diambil dari database katalog (Google Sheet "Database Produk" +
+foto Drive), bukan scrape Shopee. Alur: Dashboard (pilih ≤5 produk) ->
+Preview foto -> Proses -> Hasil.
 """
+import json
 import os
 import uuid
 from datetime import date
@@ -12,8 +17,7 @@ from flask import Flask, jsonify, render_template, request, send_from_directory
 
 import db
 from config import C
-from services import shopee
-from services import shopee_auth
+from services import catalog
 from worker import start_worker
 
 app = Flask(__name__)
@@ -45,18 +49,42 @@ def health():
     return jsonify({"ok": True})
 
 
-# ---------- preview produk ----------
-@app.route("/api/preview", methods=["POST"])
+# ---------- katalog produk (database, tanpa scrape Shopee) ----------
+@app.route("/api/catalog/categories")
 @require_token
-def api_preview():
-    data = request.get_json(force=True, silent=True) or {}
-    url = (data.get("url") or "").strip()
-    if not url:
-        return jsonify({"error": "URL kosong"}), 400
+def api_catalog_categories():
     try:
-        return jsonify({"ok": True, "product": shopee.fetch_product(url)})
+        return jsonify({"ok": True, "categories": catalog.list_categories()})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 422
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/catalog/products")
+@require_token
+def api_catalog_products():
+    try:
+        return jsonify({
+            "ok": True,
+            "products": catalog.list_products(
+                kategori=request.args.get("kategori") or None,
+                sub=request.args.get("sub") or None,
+                q=request.args.get("q") or None,
+            ),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/catalog/products/<pid>/photos")
+@require_token
+def api_catalog_photos(pid):
+    try:
+        photos = catalog.list_photos(pid)
+        if not photos and not catalog.get_product(pid):
+            return jsonify({"ok": False, "error": "produk tidak ditemukan"}), 404
+        return jsonify({"ok": True, "photos": photos})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
 
 
 # ---------- jobs ----------
@@ -77,23 +105,51 @@ def api_create_job():
     mode = request.form.get("mode", "affiliate")
     if mode not in ("iklan", "affiliate"):
         return jsonify({"error": "mode harus iklan/affiliate"}), 400
-    product_url = (request.form.get("product_url") or "").strip()
-    if not product_url:
-        return jsonify({"error": "Link produk utama wajib diisi"}), 400
-    supporting = [
-        u.strip()
-        for u in request.form.getlist("supporting_urls")
-        + (request.form.get("supporting_urls_json") or "").split(",")
-        if u.strip()
-    ]
+
+    # Produk dari database katalog: [{id, utama, photos:[url,...]}], maks 5
+    try:
+        chosen = json.loads(request.form.get("products_json") or "[]")
+    except Exception:
+        return jsonify({"error": "data produk tidak valid"}), 400
+    if not isinstance(chosen, list) or not (1 <= len(chosen) <= 5):
+        return jsonify({"error": "pilih 1–5 produk dari dashboard"}), 400
+
+    items = []
+    for entry in chosen:
+        pid = (entry.get("id") or "").strip()
+        photos = [u for u in (entry.get("photos") or [])
+                  if isinstance(u, str) and u.startswith("http")]
+        if not pid:
+            return jsonify({"error": "ID produk kosong"}), 400
+        if not photos:
+            return jsonify({"error": f"produk {pid}: pilih minimal 1 foto"}), 400
+        p = catalog.get_product(pid)
+        if not p:
+            return jsonify({"error": f"produk {pid} tidak ditemukan di database"}), 404
+        items.append({"db": p, "photos": photos, "utama": bool(entry.get("utama"))})
+
+    mains = [it for it in items if it["utama"]]
+    if len(mains) != 1:
+        # default: produk pertama = produk utama
+        for it in items:
+            it["utama"] = False
+        items[0]["utama"] = True
+    main = next(it for it in items if it["utama"])
+    supporting = [it for it in items if not it["utama"]]
+    mdb = main["db"]
+
     character_id = request.form.get("character_id") or None
     place_photo = _save_upload(request.files.get("place_photo"), "places")
-    product_photo = _save_upload(request.files.get("product_photo"), "products")
 
-    # data preview yang sudah dikonfirmasi user (opsional, dari tahap preview)
-    title = request.form.get("product_title") or product_url
-    price = request.form.get("product_price") or ""
-    image = f"/uploads/products/{os.path.basename(product_photo)}" if product_photo else (request.form.get("product_image") or "")
+    sup_data = [
+        {"id": it["db"]["id"], "nama": it["db"]["nama"], "harga": it["db"]["harga"],
+         "link": it["db"]["link_shopee"], "photos": it["photos"]}
+        for it in supporting
+    ]
+    meta = {
+        "id": mdb["id"], "kategori": mdb["kategori"], "sub": mdb["sub"],
+        "momen": mdb["momen"], "catatan": mdb["catatan"], "photos": main["photos"],
+    }
 
     job_id = uuid.uuid4().hex[:12]
     conn = db.get_conn()
@@ -101,11 +157,14 @@ def api_create_job():
         conn.execute(
             """INSERT INTO jobs (id, mode, product_url, supporting_urls, character_id,
                place_photo, status, product_title, product_price, product_image,
-               created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+               product_meta, supporting_data, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                job_id, mode, product_url, db.jdump(supporting), character_id,
-                place_photo, "antrean", title, price, image,
+                job_id, mode, mdb["link_shopee"],
+                db.jdump([it["db"]["link_shopee"] for it in supporting]),
+                character_id, place_photo, "antrean",
+                mdb["nama"], mdb["harga"], main["photos"][0],
+                db.jdump(meta), db.jdump(sup_data),
                 db._now(), db._now(),
             ),
         )
@@ -257,50 +316,6 @@ def serve_product_photo(fname):
 @require_token
 def serve_output(fname):
     return send_from_directory(C.OUTPUT_DIR, fname)
-
-
-# ---------- Shopee QR Login ----------
-@app.route("/api/shopee/status")
-@require_token
-def api_shopee_status():
-    return jsonify({"ok": True, "logged_in": shopee_auth.is_logged_in()})
-
-
-@app.route("/api/shopee/qr", methods=["POST"])
-@require_token
-def api_shopee_qr():
-    try:
-        data = shopee_auth.generate_qr()
-        return jsonify({"ok": True, **data})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-@app.route("/api/shopee/qr/check", methods=["POST"])
-@require_token
-def api_shopee_qr_check():
-    body = request.get_json(force=True, silent=True) or {}
-    qr_id = body.get("qrcode_id", "")
-    if not qr_id:
-        return jsonify({"error": "qrcode_id wajib"}), 400
-    result = shopee_auth.check_status(qr_id)
-    return jsonify({"ok": True, **result})
-
-
-@app.route("/api/shopee/qr/cancel", methods=["POST"])
-@require_token
-def api_shopee_qr_cancel():
-    body = request.get_json(force=True, silent=True) or {}
-    qr_id = body.get("qrcode_id")
-    shopee_auth.cancel_qr(qr_id)
-    return jsonify({"ok": True})
-
-
-@app.route("/api/shopee/logout", methods=["POST"])
-@require_token
-def api_shopee_logout():
-    shopee_auth.clear_cookies()
-    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":

@@ -1,7 +1,16 @@
-/* Generator Iklan & Affiliate — vanilla JS, 4 tahap: form -> preview -> proses -> hasil */
+/* Generator Iklan & Affiliate v2 — alur database:
+   dashboard (pilih ≤5 produk) -> pilih foto -> proses -> hasil */
 const $ = (id) => document.getElementById(id);
-const state = { mode: "affiliate", jobId: null, pollTimer: null, lastLogId: 0, preview: null, token: new URLSearchParams(location.search).get("token") || "" };
+const state = {
+  mode: "affiliate", jobId: null, pollTimer: null, lastLogId: 0,
+  token: new URLSearchParams(location.search).get("token") || "",
+  categories: [], products: [], selected: [], // selected: [{id,nama,harga,thumb,utama}]
+  photos: {}, // pid -> [{id,name,thumb,full}]
+  chosen: {}, // pid -> [full urls]
+  cat: "", sub: "", q: "",
+};
 const STAGES = ["Memvalidasi input", "Mengambil informasi produk", "Menganalisis foto karakter dan tempat", "Menyusun storyboard", "Membuat prompt video", "Menyiapkan hasil akhir"];
+const MAX_SELECT = 5;
 
 function api(path, opts = {}) {
   const url = state.token ? `${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(state.token)}` : path;
@@ -14,167 +23,7 @@ function api(path, opts = {}) {
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.remove("hidden"); setTimeout(() => t.classList.add("hidden"), 2500); }
 function show(view) { document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden")); $(view).classList.remove("hidden"); window.scrollTo(0, 0); }
 function errBox(id, msg) { const e = $(id); if (!msg) { e.classList.add("hidden"); return; } e.textContent = msg; e.classList.remove("hidden"); }
-
-/* ========== Shopee QR Login ========== */
-let qrPollTimer = null;
-let qrCountdownTimer = null;
-let currentQrId = null;
-
-async function checkShopeeStatus() {
-  try {
-    const j = await api("/api/shopee/status");
-    updateShopeeUI(j.logged_in);
-  } catch (e) { /* ignore */ }
-}
-
-function updateShopeeUI(loggedIn) {
-  if (loggedIn) {
-    $("shopeeLoginBtn").classList.add("hidden");
-    $("shopeeStatus").classList.remove("hidden");
-    $("shopeeLogoutBtn").classList.remove("hidden");
-  } else {
-    $("shopeeLoginBtn").classList.remove("hidden");
-    $("shopeeStatus").classList.add("hidden");
-    $("shopeeLogoutBtn").classList.add("hidden");
-  }
-}
-
-$("shopeeLoginBtn").onclick = async () => {
-  $("qrModal").classList.remove("hidden");
-  await loadQR();
-};
-
-$("qrCloseBtn").onclick = () => closeQRModal();
-$("qrModal").onclick = (e) => { if (e.target === $("qrModal")) closeQRModal(); };
-
-function closeQRModal() {
-  $("qrModal").classList.add("hidden");
-  if (qrPollTimer) { clearInterval(qrPollTimer); qrPollTimer = null; }
-  if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
-  if (currentQrId) {
-    api("/api/shopee/qr/cancel", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ qrcode_id: currentQrId }),
-    }).catch(() => {});
-    currentQrId = null;
-  }
-}
-
-$("qrRefreshBtn").onclick = async () => {
-  if (qrPollTimer) { clearInterval(qrPollTimer); qrPollTimer = null; }
-  if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
-  await loadQR();
-};
-
-async function loadQR() {
-  $("qrLoading").classList.remove("hidden");
-  $("qrLoading").textContent = "Memuat QR Code...";
-  $("qrImageWrap").classList.add("hidden");
-  $("qrTimer").classList.add("hidden");
-  $("qrInstruction").classList.add("hidden");
-  $("qrRefreshBtn").classList.add("hidden");
-  $("qrStatusMsg").textContent = "";
-  $("qrStatusMsg").className = "qr-status-msg";
-
-  if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
-
-  try {
-    const j = await api("/api/shopee/qr", { method: "POST" });
-    if (!j.ok) throw new Error(j.error || "Gagal generate QR");
-
-    currentQrId = j.qrcode_id;
-    $("qrImage").src = "data:image/png;base64," + j.qrcode_base64;
-    $("qrLoading").classList.add("hidden");
-    $("qrImageWrap").classList.remove("hidden");
-    $("qrTimer").classList.remove("hidden");
-    $("qrInstruction").classList.remove("hidden");
-
-    // Countdown 60 detik
-    let timeLeft = 60;
-    $("qrTimerCount").textContent = timeLeft;
-    qrCountdownTimer = setInterval(() => {
-      timeLeft--;
-      if (timeLeft <= 0) {
-        clearInterval(qrCountdownTimer);
-        qrCountdownTimer = null;
-        $("qrTimer").classList.add("hidden");
-        $("qrStatusMsg").textContent = "⏰ QR Code kedaluwarsa. Silakan buat QR baru.";
-        $("qrStatusMsg").className = "qr-status-msg expired";
-        $("qrRefreshBtn").classList.remove("hidden");
-      } else {
-        $("qrTimerCount").textContent = timeLeft;
-      }
-    }, 1000);
-
-    // Start polling status
-    startQRPolling(j.qrcode_id);
-  } catch (e) {
-    $("qrLoading").textContent = "Gagal memuat QR: " + e.message;
-    $("qrRefreshBtn").classList.remove("hidden");
-  }
-}
-
-function startQRPolling(qrId) {
-  if (qrPollTimer) clearInterval(qrPollTimer);
-  let attempts = 0;
-  const maxAttempts = 60; // polling tiap 2 dtk
-
-  const tick = async () => {
-    attempts++;
-    if (attempts > maxAttempts) {
-      clearInterval(qrPollTimer);
-      qrPollTimer = null;
-      if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
-      $("qrStatusMsg").textContent = "⏰ QR Code kedaluwarsa";
-      $("qrStatusMsg").className = "qr-status-msg expired";
-      $("qrRefreshBtn").classList.remove("hidden");
-      return;
-    }
-    try {
-      const j = await api("/api/shopee/qr/check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qrcode_id: qrId }),
-      });
-
-      if (j.status === "SCANNED") {
-        $("qrStatusMsg").textContent = "📱 QR di-scan! Konfirmasi di HP Anda...";
-        $("qrStatusMsg").className = "qr-status-msg scanning";
-      } else if (j.status === "CONFIRMED") {
-        clearInterval(qrPollTimer);
-        qrPollTimer = null;
-        if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
-        $("qrTimer").classList.add("hidden");
-        $("qrStatusMsg").textContent = "✅ Login berhasil!";
-        $("qrStatusMsg").className = "qr-status-msg success";
-        updateShopeeUI(true);
-        setTimeout(() => closeQRModal(), 1500);
-        toast("Login Shopee berhasil!");
-      } else if (j.status === "EXPIRED" || j.status === "ERROR") {
-        clearInterval(qrPollTimer);
-        qrPollTimer = null;
-        if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
-        $("qrTimer").classList.add("hidden");
-        $("qrStatusMsg").textContent = "⏰ " + (j.error || "QR Code kedaluwarsa");
-        $("qrStatusMsg").className = "qr-status-msg expired";
-        $("qrRefreshBtn").classList.remove("hidden");
-      }
-    } catch (e) { /* tunggu tick berikutnya */ }
-  };
-
-  tick();
-  qrPollTimer = setInterval(tick, 2000);
-}
-
-$("shopeeLogoutBtn").onclick = async () => {
-  if (!confirm("Logout dari Shopee?")) return;
-  try {
-    await api("/api/shopee/logout", { method: "POST" });
-    updateShopeeUI(false);
-    toast("Berhasil logout Shopee");
-  } catch (e) { toast("Gagal logout: " + e.message); }
-};
+function esc(s) { return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
 
 /* ---------- mode ---------- */
 $("modeIklan").onclick = () => setMode("iklan");
@@ -195,7 +44,7 @@ async function loadCharacters() {
     j.characters.forEach((c) => {
       const o = document.createElement("option"); o.value = c.id; o.textContent = c.name; sel.appendChild(o);
       const d = document.createElement("div"); d.className = "char-item";
-      d.innerHTML = `${c.photo_url ? `<img src="${c.photo_url}">` : ""}<span>${c.name}</span>`;
+      d.innerHTML = `${c.photo_url ? `<img src="${c.photo_url}">` : ""}<span>${esc(c.name)}</span>`;
       const del = document.createElement("button"); del.textContent = "✕"; del.title = "Hapus";
       del.onclick = async () => { if (confirm(`Hapus karakter ${c.name}?`)) { await api(`/api/characters/${c.id}`, { method: "DELETE" }); loadCharacters(); } };
       d.appendChild(del); list.appendChild(d);
@@ -221,129 +70,200 @@ $("placePhoto").onchange = () => {
 };
 $("placeRemove").onclick = (e) => { e.stopPropagation(); $("placePhoto").value = ""; $("placePreview").classList.add("hidden"); $("placeName").textContent = ""; $("placeRemove").classList.add("hidden"); };
 
-/* ---------- form ---------- */
-$("resetBtn").onclick = () => { document.querySelectorAll("#view-form input[type=url], #view-form input[type=text]").forEach((i) => (i.value = "")); $("placeRemove").onclick({ stopPropagation() {} }); setMode("affiliate"); errBox("formError", ""); };
-$("nextBtn").onclick = async () => {
-  errBox("formError", "");
-  const rawInput = $("productUrl").value.trim();
-  if (!rawInput) { errBox("formError", "Link atau teks share produk wajib diisi."); return; }
-  
-  show("view-preview");
-  $("previewLoading").classList.remove("hidden");
-  $("previewContent").classList.add("hidden");
-  errBox("previewError", "");
-
+/* ========== TAHAP 1: DASHBOARD ========== */
+async function loadCategories() {
   try {
-    const j = await api("/api/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: rawInput }),
-    });
-    state.preview = j.product;
-    renderPreview(j.product);
-    $("previewLoading").classList.add("hidden");
-    $("previewContent").classList.remove("hidden");
-    if (j.product && j.product.needs_manual_input) {
-      errBox("previewError", "Shopee membatasi akses otomatis. Silakan cek & lengkapi data nama produk di bawah sebelum melanjutkan.");
-    }
+    const j = await api("/api/catalog/categories");
+    state.categories = j.categories || [];
+    renderCatPills();
   } catch (e) {
-    $("previewLoading").classList.add("hidden");
-    errBox("previewError", e.message + " — Silakan isi data nama produk secara manual di bawah.");
-    $("previewContent").classList.remove("hidden");
-    renderPreview(null);
-  }
-};
-
-function renderPreview(main) {
-  const p = main || {};
-  state.productPhotoFile = null;
-  const initialImg = p.image || "";
-
-  $("mainProductCard").innerHTML = `
-    <div style="width: 100%; display: flex; flex-direction: column; gap: 12px;">
-      <div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;">
-        <div id="previewImgBox" style="width: 130px; height: 130px; border-radius: 10px; border: 2px dashed var(--border); display: flex; align-items: center; justify-content: center; overflow: hidden; background: #fafafa; flex-shrink: 0; cursor: pointer; position: relative;" title="Klik untuk upload foto produk">
-          ${initialImg ? `<img id="previewImgEl" src="${initialImg}" style="width: 100%; height: 100%; object-fit: cover;">` : `<div style="font-size: 0.78rem; color: var(--muted); text-align: center; padding: 6px;">📷 Upload Foto Produk</div>`}
-        </div>
-        <div style="flex: 1; min-width: 240px;">
-          <label style="margin: 0 0 4px 0; font-size: 0.88rem;">Nama / Judul Produk <span class="req">*</span></label>
-          <input type="text" id="editProductTitle" value="${(p.title || '').replace(/"/g, '&quot;')}" placeholder="Contoh: Xavire Dress Party Dress..." style="margin-bottom: 8px; font-weight: 600;">
-          
-          <label style="margin: 0 0 4px 0; font-size: 0.88rem;">Harga Produk</label>
-          <input type="text" id="editProductPrice" value="${(p.price || '').replace(/"/g, '&quot;')}" placeholder="Contoh: Rp176.500" style="margin-bottom: 0;">
-        </div>
-      </div>
-      <input type="file" id="editProductPhotoFile" accept="image/*" style="display: none;">
-      <small style="color: var(--muted);">💡 Anda dapat mengoreksi nama, harga, atau mengupload foto produk langsung sebelum menekan tombol Proses.</small>
-    </div>
-  `;
-
-  $("previewImgBox").onclick = () => $("editProductPhotoFile").click();
-  $("editProductPhotoFile").onchange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      state.productPhotoFile = file;
-      const url = URL.createObjectURL(file);
-      $("previewImgBox").innerHTML = `<img src="${url}" style="width: 100%; height: 100%; object-fit: cover;">`;
-    }
-  };
-
-  const supGrid = $("supProducts");
-  supGrid.innerHTML = "";
-  for (const inp of document.querySelectorAll(".supUrl")) {
-    const u = inp.value.trim();
-    if (!u) continue;
-    try {
-      api("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u }) })
-        .then((j) => {
-          const sp = j.product || {};
-          supGrid.innerHTML += `<div class="product-card"><div><b>${sp.title || u}</b><br><span class="price">${sp.price || ""}</span></div></div>`;
-        })
-        .catch(() => {
-          supGrid.innerHTML += `<div class="product-card"><div><b>Produk Penunjang:</b><br><small>${u}</small></div></div>`;
-        });
-    } catch (e) { /* ignore */ }
+    $("catPills").innerHTML = `<div class="error">Gagal memuat kategori: ${esc(e.message)}</div>`;
   }
 }
 
+function renderCatPills() {
+  const wrap = $("catPills"); wrap.innerHTML = "";
+  const all = document.createElement("button");
+  all.type = "button"; all.className = "pill" + (state.cat === "" ? " active" : ""); all.textContent = "Semua";
+  all.onclick = () => { state.cat = ""; state.sub = ""; renderCatPills(); loadProducts(); };
+  wrap.appendChild(all);
+  state.categories.forEach((c) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "pill" + (state.cat === c.kategori ? " active" : ""); b.textContent = c.kategori;
+    b.onclick = () => { state.cat = c.kategori; state.sub = ""; renderCatPills(); loadProducts(); };
+    wrap.appendChild(b);
+  });
+  renderSubSelect();
+}
+
+function renderSubSelect() {
+  const sel = $("subSelect");
+  sel.innerHTML = '<option value="">Semua sub-kategori</option>';
+  const c = state.categories.find((x) => x.kategori === state.cat);
+  (c ? c.sub : []).forEach((s) => {
+    const o = document.createElement("option"); o.value = s; o.textContent = s;
+    if (state.sub === s) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+$("subSelect").onchange = (e) => { state.sub = e.target.value; loadProducts(); };
+
+let searchTimer = null;
+$("searchInput").oninput = (e) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { state.q = e.target.value.trim(); loadProducts(); }, 400);
+};
+
+async function loadProducts() {
+  const grid = $("productGrid");
+  grid.innerHTML = '<div class="loading">Memuat produk…</div>';
+  try {
+    const p = new URLSearchParams();
+    if (state.cat) p.set("kategori", state.cat);
+    if (state.sub) p.set("sub", state.sub);
+    if (state.q) p.set("q", state.q);
+    const j = await api("/api/catalog/products?" + p.toString());
+    state.products = j.products || [];
+    renderGrid();
+  } catch (e) {
+    grid.innerHTML = `<div class="error">Gagal memuat produk: ${esc(e.message)}</div>`;
+  }
+}
+
+function isSelected(pid) { return state.selected.some((s) => s.id === pid); }
+
+function renderGrid() {
+  const grid = $("productGrid"); grid.innerHTML = "";
+  if (!state.products.length) { grid.innerHTML = '<div class="loading">Tidak ada produk.</div>'; return; }
+  state.products.forEach((p) => {
+    const sel = state.selected.find((s) => s.id === p.id);
+    const card = document.createElement("div");
+    card.className = "pcard" + (sel ? " selected" : "");
+    card.innerHTML = `
+      ${sel && sel.utama ? '<span class="badge-utama">⭐ UTAMA</span>' : ""}
+      ${p.thumb ? `<img src="${esc(p.thumb)}" alt="" loading="lazy">` : '<div class="noimg">📷</div>'}
+      <div class="pcard-body">
+        <div class="pcard-name">${esc(p.nama)}</div>
+        <div class="pcard-price">${esc(p.harga || "")}</div>
+      </div>
+      <div class="pcard-check">${sel ? "✓" : ""}</div>`;
+    card.onclick = () => toggleSelect(p);
+    grid.appendChild(card);
+  });
+  renderSelectBar();
+}
+
+function toggleSelect(p) {
+  const idx = state.selected.findIndex((s) => s.id === p.id);
+  if (idx >= 0) {
+    const removed = state.selected.splice(idx, 1)[0];
+    if (removed.utama && state.selected.length) state.selected[0].utama = true;
+  } else {
+    if (state.selected.length >= MAX_SELECT) { toast(`Maksimal ${MAX_SELECT} produk`); return; }
+    state.selected.push({ id: p.id, nama: p.nama, harga: p.harga, thumb: p.thumb, utama: state.selected.length === 0 });
+  }
+  renderGrid();
+}
+
+function renderSelectBar() {
+  const bar = $("selectBar");
+  if (!state.selected.length) { bar.classList.add("hidden"); return; }
+  bar.classList.remove("hidden");
+  $("selectCount").textContent = `${state.selected.length}/${MAX_SELECT} dipilih`;
+  const main = state.selected.find((s) => s.utama);
+  $("mainLabel").innerHTML = main
+    ? `⭐ Utama: <b>${esc(main.nama.slice(0, 40))}</b> <button type="button" id="changeMainBtn" class="btn small">Ganti</button>`
+    : "";
+  const cb = $("changeMainBtn");
+  if (cb) cb.onclick = (e) => {
+    e.stopPropagation();
+    // putar produk utama ke pilihan berikutnya
+    const i = state.selected.findIndex((s) => s.utama);
+    state.selected.forEach((s) => (s.utama = false));
+    state.selected[(i + 1) % state.selected.length].utama = true;
+    renderGrid();
+  };
+}
+$("clearSelectBtn").onclick = () => { state.selected = []; renderGrid(); };
+
+$("resetBtn").onclick = () => {
+  state.selected = []; state.cat = ""; state.sub = ""; state.q = "";
+  $("searchInput").value = ""; $("subSelect").value = "";
+  $("placeRemove").onclick({ stopPropagation() {} });
+  setMode("affiliate"); errBox("formError", "");
+  renderCatPills(); loadProducts();
+};
+
+$("nextBtn").onclick = async () => {
+  errBox("formError", "");
+  if (!state.selected.length) { errBox("formError", "Pilih minimal 1 produk dari dashboard."); return; }
+  show("view-preview");
+  await renderPhotoPreview();
+};
+
+/* ========== TAHAP 2: PILIH FOTO ========== */
+async function renderPhotoPreview() {
+  const wrap = $("photoSections");
+  wrap.innerHTML = '<div class="loading">Memuat foto produk…</div>';
+  errBox("previewError", "");
+  state.chosen = {};
+  for (const s of state.selected) {
+    try {
+      const j = await api(`/api/catalog/products/${encodeURIComponent(s.id)}/photos`);
+      state.photos[s.id] = j.photos || [];
+    } catch (e) {
+      state.photos[s.id] = [];
+    }
+    // default: semua foto terpilih
+    state.chosen[s.id] = state.photos[s.id].map((p) => p.full);
+  }
+  wrap.innerHTML = "";
+  state.selected.forEach((s) => {
+    const sec = document.createElement("div");
+    sec.className = "photo-section";
+    const photos = state.photos[s.id] || [];
+    sec.innerHTML = `<h3>${s.utama ? "⭐ " : ""}${esc(s.nama)} <small>(${photos.length} foto)</small></h3>
+      <div class="photo-grid"></div>`;
+    const grid = sec.querySelector(".photo-grid");
+    if (!photos.length) grid.innerHTML = '<div class="loading">Tidak ada foto.</div>';
+    photos.forEach((ph) => {
+      const d = document.createElement("div");
+      d.className = "photo-item selected";
+      d.innerHTML = `<img src="${esc(ph.thumb)}" alt="" loading="lazy"><span class="photo-check">✓</span>`;
+      d.onclick = () => {
+        const i = state.chosen[s.id].indexOf(ph.full);
+        if (i >= 0) { state.chosen[s.id].splice(i, 1); d.classList.remove("selected"); }
+        else { state.chosen[s.id].push(ph.full); d.classList.add("selected"); }
+      };
+      grid.appendChild(d);
+    });
+    wrap.appendChild(sec);
+  });
+}
 $("backBtn").onclick = () => show("view-form");
 
 /* ---------- buat job & proses ---------- */
 $("processBtn").onclick = async () => {
-  const title = $("editProductTitle") ? $("editProductTitle").value.trim() : "";
-  if (!title) {
-    errBox("previewError", "Nama produk wajib diisi sebelum melanjutkan.");
-    return;
+  errBox("previewError", "");
+  for (const s of state.selected) {
+    if (!state.chosen[s.id] || !state.chosen[s.id].length) {
+      errBox("previewError", `Pilih minimal 1 foto untuk: ${s.nama.slice(0, 50)}`);
+      return;
+    }
   }
-  const price = $("editProductPrice") ? $("editProductPrice").value.trim() : "";
-
   const fd = new FormData();
   fd.append("mode", state.mode);
-
-  // Ambil URL produk yang valid
-  let rawUrl = $("productUrl").value.trim();
-  let m = rawUrl.match(/(https?:\/\/(?:s\.shopee\.co\.id|shope\.ee|shopee\.co\.id)\/\S+)/);
-  let finalUrl = m ? m[1] : (state.preview && state.preview.url ? state.preview.url : rawUrl);
-  fd.append("product_url", finalUrl);
-
-  document.querySelectorAll(".supUrl").forEach((i) => { if (i.value.trim()) fd.append("supporting_urls", i.value.trim()); });
   fd.append("character_id", $("characterSelect").value);
   if ($("placePhoto").files[0]) fd.append("place_photo", $("placePhoto").files[0]);
-
-  fd.append("product_title", title);
-  fd.append("product_price", price);
-
-  if (state.productPhotoFile) {
-    fd.append("product_photo", state.productPhotoFile);
-  } else if (state.preview && state.preview.image) {
-    fd.append("product_image", state.preview.image);
-  }
-
+  fd.append("products_json", JSON.stringify(
+    state.selected.map((s) => ({ id: s.id, utama: s.utama, photos: state.chosen[s.id] }))
+  ));
   try {
     const j = await api("/api/jobs", { method: "POST", body: fd });
     startPolling(j.job_id);
   } catch (e) { errBox("previewError", e.message); }
 };
+
 function renderChecklist(currentStage, status) {
   const ul = $("checklist"); ul.innerHTML = "";
   STAGES.forEach((s, i) => {
@@ -398,7 +318,6 @@ async function showResult(jobId) {
     const j = await api(`/api/jobs/${jobId}/result`);
     const wrap = $("storyboards"); wrap.innerHTML = "";
     (j.storyboard_urls || []).forEach((u) => {
-      // tampilkan dari file lokal bila tersedia via outputs, fallback link Drive
       const img = document.createElement("img"); img.src = u; img.alt = "storyboard"; wrap.appendChild(img);
     });
     if (!j.storyboard_urls || !j.storyboard_urls.length) wrap.innerHTML = "<p><small>File storyboard tersimpan di server (cek folder outputs).</small></p>";
@@ -417,4 +336,5 @@ $("dlStoryboardBtn").onclick = () => {
 };
 
 loadCharacters();
-checkShopeeStatus();
+loadCategories();
+loadProducts();

@@ -3,12 +3,13 @@
 Dijalankan sebagai thread di dalam app.py. Tanpa Celery/Redis (low maintenance).
 Tahapan (sinkron dengan checklist UI):
   1. Memvalidasi input
-  2. Mengambil informasi produk
+  2. Mengambil informasi produk (v2: dari database katalog, tanpa scrape Shopee)
   3. Menganalisis foto karakter dan tempat
   4. Menyusun storyboard
   5. Membuat prompt video
   6. Menyiapkan hasil akhir (upload Drive + tulis Google Sheet)
 """
+import json
 import os
 import threading
 import time
@@ -22,7 +23,6 @@ from services import images as images_svc
 from services import llm as llm_svc
 from services import prompts as prompts_svc
 from services import sheets as sheets_svc
-from services import shopee as shopee_svc
 
 STAGES = [
     "Memvalidasi input",
@@ -94,37 +94,76 @@ def process_job(job_id):
         # ---- 2. info produk ----
         _stage(conn, job_id, 1)
         try:
-            product = shopee_svc.fetch_product(job["product_url"])
+            meta = json.loads(job["product_meta"] or "{}")
         except Exception:
-            # pakai data preview yang sudah dikonfirmasi user
+            meta = {}
+        if meta.get("id"):
+            # v2: data produk sudah lengkap dari database katalog (tanpa scrape)
+            desc = meta.get("catatan") or " / ".join(
+                x for x in (meta.get("kategori"), meta.get("sub")) if x
+            )
             product = {
                 "url": job["product_url"],
                 "title": job["product_title"] or job["product_url"],
                 "price": job["product_price"] or "",
                 "image": job["product_image"] or "",
-                "rating": "",
-                "description": "",
+                "rating": job["product_rating"] or "",
+                "description": desc,
             }
-            db.log(conn, job_id, "Fetch ulang gagal, memakai data preview.", level="warning")
-        supporting = []
-        for u in db.jload(job["supporting_urls"]):
+            supporting = [
+                {
+                    "title": s.get("nama", ""),
+                    "price": s.get("harga", ""),
+                    "url": s.get("link", ""),
+                    "image": (s.get("photos") or [""])[0],
+                }
+                for s in db.jload(job["supporting_data"])
+            ]
+            db.set_job(
+                conn, job_id,
+                product_title=product["title"], product_price=product["price"],
+                product_image=product["image"], supporting_data=db.jdump(supporting),
+            )
+            db.log(conn, job_id, f"Info produk dari database: {product['title'][:60]}")
+        else:
+            # legacy: job lama dari alur tempel-link (fetch Shopee best-effort)
+            from services import shopee as shopee_svc
             try:
-                supporting.append(shopee_svc.fetch_product(u))
-            except Exception as e:
-                db.log(conn, job_id, f"Link penunjang dilewati: {e}", level="warning")
-        db.set_job(
-            conn, job_id,
-            product_title=product["title"], product_price=product["price"],
-            product_image=product["image"], supporting_data=db.jdump(supporting),
-        )
+                product = shopee_svc.fetch_product(job["product_url"])
+            except Exception:
+                # pakai data preview yang sudah dikonfirmasi user
+                product = {
+                    "url": job["product_url"],
+                    "title": job["product_title"] or job["product_url"],
+                    "price": job["product_price"] or "",
+                    "image": job["product_image"] or "",
+                    "rating": "",
+                    "description": "",
+                }
+                db.log(conn, job_id, "Fetch ulang gagal, memakai data preview.", level="warning")
+            supporting = []
+            for u in db.jload(job["supporting_urls"]):
+                try:
+                    supporting.append(shopee_svc.fetch_product(u))
+                except Exception as e:
+                    db.log(conn, job_id, f"Link penunjang dilewati: {e}", level="warning")
+            db.set_job(
+                conn, job_id,
+                product_title=product["title"], product_price=product["price"],
+                product_image=product["image"], supporting_data=db.jdump(supporting),
+            )
         _done_stage(conn, job_id, f"Info produk didapat: {product['title'][:60]}")
 
         # insert ke sheet (status 'proses story board')
         try:
             char = _get_character(conn, job["character_id"])
+            sup_links = " | ".join(
+                s.get("url", "") for s in supporting if s.get("url")
+            )
             sheet_row = sheets_svc.insert_row(
                 product["title"], job["product_url"], mode,
                 char["name"], date.today().isoformat(),
+                allow_duplicate=True, supporting=sup_links,
             )
             db.set_job(conn, job_id, sheet_row=sheet_row)
             db.log(conn, job_id, f"Baris sheet dibuat (baris {sheet_row}), status 'proses story board'.")

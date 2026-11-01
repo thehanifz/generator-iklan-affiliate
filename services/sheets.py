@@ -55,14 +55,20 @@ def find_row_by_link(svc, product_url):
     return None
 
 
-def insert_row(product_title, product_url, mode, character_name, date_str):
-    """Tambah baris baru, status 'proses story board'. Kembalikan nomor baris."""
+def insert_row(product_title, product_url, mode, character_name, date_str,
+               allow_duplicate=False, supporting=""):
+    """Tambah baris baru, status 'proses story board'. Kembalikan nomor baris.
+
+    allow_duplicate=True: lewati cek duplikat (untuk alur database v2, tiap job
+    = 1 video baru walau produknya sama). supporting: teks "Link Penunjang".
+    """
     svc = _service()
-    if find_row_by_link(svc, product_url):
+    if not allow_duplicate and find_row_by_link(svc, product_url):
         raise RuntimeError("Link produk ini sudah ada di sheet (duplikat).")
     row = [""] * len(HEADERS)
     row[0] = product_title
     row[1] = product_url
+    row[2] = supporting
     row[3] = mode
     row[4] = character_name or ""
     row[5] = date_str

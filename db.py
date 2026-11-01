@@ -26,6 +26,10 @@ def init_db():
     conn = get_conn()
     try:
         conn.executescript(schema)
+        # migrasi ringan: tambah kolom product_meta bila DB dibuat sebelum v2
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+        if "product_meta" not in cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN product_meta TEXT DEFAULT '{}'")
         conn.commit()
     finally:
         conn.close()

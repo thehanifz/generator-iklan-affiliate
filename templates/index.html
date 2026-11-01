@@ -10,64 +10,32 @@
 <header class="topbar">
   <h1>🎬 Generator Iklan &amp; Affiliate</h1>
   <div class="topbar-right">
-    <button type="button" id="shopeeLoginBtn" class="btn small shopee-btn" title="Login Shopee">🛒 Login Shopee</button>
-    <span id="shopeeStatus" class="shopee-status hidden">✅ Terhubung</span>
-    <button type="button" id="shopeeLogoutBtn" class="btn small hidden" title="Logout Shopee">Logout</button>
     <span id="authBadge" class="badge hidden">🔒</span>
   </div>
 </header>
 
-<!-- Modal QR Shopee -->
-<div id="qrModal" class="modal-overlay hidden">
-  <div class="modal-box">
-    <div class="modal-header">
-      <h3>🛒 Login Shopee via QR Code</h3>
-      <button type="button" id="qrCloseBtn" class="modal-close">✕</button>
-    </div>
-    <div class="modal-body">
-      <div id="qrLoading" class="qr-loading">Memuat QR Code...</div>
-      <div id="qrImageWrap" class="qr-image-wrap hidden">
-        <img id="qrImage" alt="QR Code Shopee" />
-      </div>
-      <div id="qrTimer" class="qr-timer hidden" style="font-size: 0.85rem; color: #e67e22; font-weight: 600; margin-top: 6px;">
-        ⏳ Masa berlaku: <span id="qrTimerCount">60</span> detik
-      </div>
-      <div id="qrInstruction" class="qr-instruction hidden" style="text-align: left; font-size: 0.82rem; margin-top: 10px; background: #fff8f5; border: 1px solid #ffd8cc; padding: 10px; border-radius: 6px;">
-        <p style="font-weight: bold; margin: 0 0 6px 0; color: #d35400;">⚠️ Panduan Scan di HP:</p>
-        <ol style="margin: 0; padding-left: 18px; line-height: 1.45;">
-          <li>Buka <b>Aplikasi Shopee</b> di HP Anda.</li>
-          <li>Di halaman <b>Beranda</b>, ketuk ikon <b>[ - ] Scan</b> (di samping kolom pencarian).</li>
-          <li>Pastikan memilih mode <b>QR / Barcode</b> (<b>JANGAN</b> scan lewat menu ShopeePay / QRIS).</li>
-          <li>Arahkan kamera ke QR di atas, lalu ketuk <b>Konfirmasi Login</b>.</li>
-        </ol>
-        <div style="margin-top: 6px; font-size: 0.78rem; color: #7f8c8d;">
-          *Jika muncul <i>"Kode QR salah"</i>, kode QR sudah kedaluwarsa atau salah menu scanner. Klik tombol <b>🔄 Buat QR Baru</b> di bawah lalu segera scan.
-        </div>
-      </div>
-      <div id="qrStatusMsg" class="qr-status-msg"></div>
-      <button type="button" id="qrRefreshBtn" class="btn small hidden">🔄 Buat QR Baru</button>
-    </div>
-  </div>
-</div>
-
 <main class="container">
 
-  <!-- ============ TAHAP 1: FORM ============ -->
+  <!-- ============ TAHAP 1: DASHBOARD ============ -->
   <section id="view-form" class="view">
     <div class="card">
-      <h2>1. Form Input <small>Isi data produk dan aset visual</small></h2>
+      <h2>1. Pilih Produk <small>dari database katalog (maks 5)</small></h2>
       <div class="mode-row">
         <button type="button" id="modeIklan" class="mode-btn">📣 Bikin Iklan</button>
         <button type="button" id="modeAffiliate" class="mode-btn active">🛍️ Bikin Affiliate</button>
       </div>
 
-      <label>Link atau Teks Share Produk Utama <span class="req">*</span></label>
-      <input type="text" id="productUrl" placeholder="Tempel link atau teks share Shopee (misal: Cek Dress... https://s.shopee.co.id/...)">
-
-      <label>Link Produk Penunjang <span class="opt">(opsional)</span></label>
-      <input type="url" class="supUrl" placeholder="Link produk penunjang 1">
-      <input type="url" class="supUrl" placeholder="Link produk penunjang 2">
-      <input type="url" class="supUrl" placeholder="Link produk penunjang 3">
+      <div id="catPills" class="cat-pills"><div class="loading">Memuat kategori…</div></div>
+      <div class="dash-tools">
+        <select id="subSelect"><option value="">Semua sub-kategori</option></select>
+        <input type="text" id="searchInput" placeholder="🔍 Cari produk…">
+      </div>
+      <div id="selectBar" class="select-bar hidden">
+        <span id="selectCount">0/5 dipilih</span>
+        <span id="mainLabel" class="main-label"></span>
+        <button type="button" id="clearSelectBtn" class="btn small">Bersihkan</button>
+      </div>
+      <div id="productGrid" class="product-grid"><div class="loading">Memuat produk…</div></div>
 
       <div class="two-col">
         <div>
@@ -97,25 +65,21 @@
       </div>
 
       <div class="form-actions">
-        <button type="button" id="resetBtn" class="btn">Reset Form</button>
+        <button type="button" id="resetBtn" class="btn">Reset</button>
         <button type="button" id="nextBtn" class="btn primary">Lanjutkan →</button>
       </div>
       <div id="formError" class="error hidden"></div>
     </div>
   </section>
 
-  <!-- ============ TAHAP 2: PREVIEW ============ -->
+  <!-- ============ TAHAP 2: PILIH FOTO ============ -->
   <section id="view-preview" class="view hidden">
     <div class="card">
-      <h2>2. Preview Produk <small>Verifikasi produk sebelum diproses</small></h2>
-      <div id="previewLoading" class="loading">Mengambil info produk…</div>
-      <div id="previewContent" class="hidden">
-        <div id="mainProductCard" class="product-card"></div>
-        <div id="supProducts" class="sup-grid"></div>
-        <div class="form-actions">
-          <button type="button" id="backBtn" class="btn">← Kembali</button>
-          <button type="button" id="processBtn" class="btn primary">Proses →</button>
-        </div>
+      <h2>2. Pilih Foto <small>foto dari folder Drive tiap produk</small></h2>
+      <div id="photoSections"></div>
+      <div class="form-actions">
+        <button type="button" id="backBtn" class="btn">← Kembali</button>
+        <button type="button" id="processBtn" class="btn primary">Proses →</button>
       </div>
       <div id="previewError" class="error hidden"></div>
     </div>

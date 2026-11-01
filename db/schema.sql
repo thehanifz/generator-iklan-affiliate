@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     product_price TEXT,
     product_image TEXT,
     product_rating TEXT,
+    product_meta TEXT DEFAULT '{}',     -- JSON: id, kategori, sub, momen, catatan, photos (alur database v2)
     supporting_data TEXT DEFAULT '[]',     -- JSON array
     storyboard_files TEXT DEFAULT '[]',    -- JSON array path lokal
     storyboard_urls TEXT DEFAULT '[]',     -- JSON array link Drive
